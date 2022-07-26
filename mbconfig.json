@@ -1,0 +1,6 @@
+{
+    "colladaPath": "collada",
+    "texturesPath": "textures",
+    "dataDir": "data_dir",
+    "depsInstalled": false
+}

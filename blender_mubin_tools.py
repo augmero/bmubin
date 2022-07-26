@@ -8,22 +8,41 @@ from scripts.mubin.get_stats import mubin_stats
 import tkinter as tk
 from tkinter import filedialog
 
-
-with open("mbconfig.json", "r") as f:
-    config = json.load(f)
+# config = {}
+with open("mbconfig.json", "r") as config_load:
+    config = json.load(config_load)
+    config_load.close()
 
 tk_obj = tk.Tk()
 
 
 def install_dependencies():
     # Set app data information
+    print('Setting up...')
 
     # Write cache file
+    if not Path(f'{config["dataDir"]}').is_dir():
+        Path(f'{config["dataDir"]}').mkdir()
     if not Path(f'{config["dataDir"]}\\cache').is_dir():
         Path(f'{config["dataDir"]}\\cache').mkdir()
     Path(f'{config["dataDir"]}\\cache.json').write_text(json.dumps({}))
 
+    # set up needed folders
+    if not Path('asset_library').is_dir():
+        Path('asset_library').mkdir()
+    if not Path('asset_library\\assets').is_dir():
+        Path('asset_library\\assets').mkdir()
+    if not Path('collada').is_dir():
+        Path('collada').mkdir()
+    if not Path('textures').is_dir():
+        Path('textures').mkdir()
+    if not Path('starting_scene').is_dir():
+        Path('starting_scene').mkdir()
+
     config["depsInstalled"] = True
+    with open("mbconfig.json", "w") as config_load:
+        json.dump(config, config_load, indent=4)
+        config_load.close()
     print('Install Complete!')
 
     return {'FINISHED'}
@@ -38,15 +57,16 @@ def init_tk():
 
 
 def getBlenderPath():
-    if not config["blenderPath"]:
-        print('We need blender to run this script, please select the executable')
+    if "blenderPath" not in config:
+        print('Blender required to run this script, please select the executable')
         exe_filetypes = [('exe', '*.exe'), ('all', '*.*')]
         blender_executable = filedialog.askopenfilename(filetypes=exe_filetypes)
         if not blender_executable:
             print('Blender executable not found, returning to main menu')
-            select_task()
             return
         config["blenderPath"] = blender_executable
+        with open("mbconfig.json", "w") as write_config:
+            json.dump(config, write_config, indent=4)
 
 
 def new_stats():
@@ -170,7 +190,7 @@ def run_task(task):
 
 
 def select_task():
-    print('Welcome to the mubin_to_blender script task selection system')
+    print('\nWelcome to the mubin_to_blender script task selection system')
     print('1: build asset library')
     print('2: build single asset')
     print('3: import mubin(s)')
@@ -188,7 +208,7 @@ def main():
     init_tk()
     config["dataDir"] = os.path.abspath('data_dir')
     getBlenderPath()
-    if config["depsInstalled"] == False:
+    if not config["depsInstalled"]:
         try:
             install_dependencies()
         except:
