@@ -1,0 +1,2 @@
+fake_bpy_module_latest==20220629
+oead==1.2.4.post2
