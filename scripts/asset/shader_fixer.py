@@ -74,6 +74,7 @@ def fix_shaders():
         material_nodes = o.active_material.node_tree.nodes
         material_links = o.active_material.node_tree.links
         o.active_material.blend_method = "HASHED"
+        o.active_material.use_backface_culling = True
 
         shader = material_nodes.get('Principled BSDF')
 
