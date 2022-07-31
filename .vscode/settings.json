@@ -21,6 +21,7 @@
     "peacock.color": "#1a8370",
     "search.exclude": {
         "collada/": true,
+        "collada_parsed/": true,
         "collada2/": true,
         "textures/": true,
         "asset_library/": true,
@@ -38,6 +39,7 @@
         "**/Thumbs.db": true,
         "**error.txt": true,
         "collada/": true,
+        "collada_parsed/": true,
         "collada2/": true,
         "textures/": true,
         "asset_library/": true,

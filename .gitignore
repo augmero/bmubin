@@ -1,6 +1,8 @@
 # mubin_to_blender ignores
 asset_library/
 collada/
+collada_parsed/
+collada2/
 textures/
 starting_scene/
 data_dir/
