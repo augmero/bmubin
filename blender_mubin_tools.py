@@ -8,7 +8,6 @@ from scripts.mubin.get_stats import mubin_stats
 import tkinter as tk
 from tkinter import filedialog
 
-# config = {}
 with open("mbconfig.json", "r") as config_load:
     config = json.load(config_load)
     config_load.close()
@@ -34,6 +33,8 @@ def install_dependencies():
         Path('asset_library\\assets').mkdir()
     if not Path('collada').is_dir():
         Path('collada').mkdir()
+    if not Path('collada_parsed').is_dir():
+        Path('collada_parsed').mkdir()
     if not Path('textures').is_dir():
         Path('textures').mkdir()
     if not Path('starting_scene').is_dir():
@@ -167,7 +168,7 @@ def run_task(task):
             print('No file selected, back to main menu')
             select_task()
             return
-        build_asset(dae_file, False, timeout_s=60)
+        build_asset(dae_file, quiet=False, timeout_s=60)
     elif '3' in task or '4' in task:
         mubin_filetypes = [('mubin', '*.smubin'), ('all', '*.*')]
         mubin_paths = filedialog.askopenfilenames(filetypes=mubin_filetypes)
