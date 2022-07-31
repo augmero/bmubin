@@ -9,8 +9,9 @@ from pathlib import Path
 sys.path.append('.')
 
 # local script imports
-from scripts.asset import dae_texture_directory as dtd
+# auto formatting this file will move these above sys.path.append, breaking the script
 from scripts.asset import shader_fixer
+from scripts.asset import dae_fixer
 
 with open("mbconfig.json", "r") as f:
     config = json.load(f)
@@ -28,7 +29,7 @@ def save(path):
         print(f'save failed for {path}')
 
 
-def import_dae(path):
+def import_dae(path:str):
     print('importing dae')
     # Import DAE
     bpy.ops.wm.collada_import(filepath=path)
@@ -72,26 +73,6 @@ def yes_or_no(default):
     else:
         return default
 
-# check if the collada file references the correct relative path for the textures
-
-
-def correct_texture_directory(path, ask):
-    # import dae_texture_directory as dtd
-    # from dae_texture_directory import has_fixed_texture_dir
-    # from dae_texture_directory import find_replace_image_dir
-    print('after import')
-    if not dtd.has_fixed_texture_dir(path):
-        if not ask:
-            dtd.find_replace_image_dir(path)
-            return True
-        else:
-            print('Fix texture reference in collada? Y/n')
-            user_choice = yes_or_no(True)
-            if user_choice:
-                dtd.find_replace_image_dir(path)
-                return True
-    return False
-
 
 def main():
     argv = sys.argv
@@ -103,8 +84,6 @@ def main():
     # example arg
     # TwnObj_Village_Hateno_A-51\TwnObj_Village_HatenoHouse_A_L_02.dae
     if argv and argv[0]:
-        print(argv)
-        print(len(argv))
         asset_path = argv[0]
         dae_name = Path(asset_path).stem
         save_path = base_path+'\\'+dae_name+'.blend'
@@ -113,13 +92,12 @@ def main():
             return
         clean_file()
 
-        fix_texture_dir = len(argv) > 1 and argv[1] == '--fix_texture_dir'
-        if fix_texture_dir:
-            print('fix texture dir')
-            ask_fix_texture_dir = len(argv) > 2 and argv[2] == '--ask_fix_texture_dir'
-            correct_texture_directory(asset_path, ask_fix_texture_dir)
+        new_dae_file_path = dae_fixer.get_new_dae_path(asset_path)
 
-        import_dae(asset_path)
+        if not new_dae_file_path.is_file():
+            new_dae_file_path = dae_fixer.fix_dae(asset_path)
+
+        import_dae(str(new_dae_file_path))
         shader_fixer.fix_shaders()
         set_shading_type()
         armature = bpy.data.objects["Armature"]
