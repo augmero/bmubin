@@ -96,9 +96,10 @@ def main():
 
         if not new_dae_file_path.is_file():
             new_dae_file_path = dae_fixer.fix_dae(asset_path)
+        # new_dae_file_path = dae_fixer.fix_dae(asset_path)
 
         import_dae(str(new_dae_file_path))
-        shader_fixer.fix_shaders()
+        shader_fixer.fix_shaders(dae_name)
         set_shading_type()
         armature = bpy.data.objects["Armature"]
         armature.name = dae_name

@@ -1,3 +1,4 @@
+import os
 import shutil
 from pathlib import Path
 import re
@@ -35,6 +36,8 @@ def fix_dae(dae_file_path):
         str(Path(dae_file_path).stem) + '.dae'
     ).absolute()
     print(new_dae_file_path)
+    if os.path.exists(new_dae_file_path):
+        os.remove(new_dae_file_path)
     shutil.copyfile(dae_file_path, new_dae_file_path)
     # fix_texture_dir(new_dae_file_path)
     open_and_fix_problems(new_dae_file_path)
@@ -55,6 +58,7 @@ def open_and_fix_problems(dae_file_path):
 def simplify_names(lines: list[str]):
     name_cache = {}
     sequential_number = 0
+    sequential_numberv = 0
     # first pass build name cache
     for line in lines:
         # TEXCOORD
@@ -73,10 +77,10 @@ def simplify_names(lines: list[str]):
             matched_name = regex_match.group()[9:]
             if matched_name in name_cache:
                 continue
-            number_zfill = str(sequential_number).zfill(5)
+            number_zfill = str(sequential_numberv).zfill(5)
             matched_name_value = f'bmubin_fixed_{number_zfill}-color'
             name_cache[matched_name] = matched_name_value
-            sequential_number += 1
+            sequential_numberv += 1
     print(json.dumps(name_cache, indent=4))
     # now rename
     lines_to_write = lines

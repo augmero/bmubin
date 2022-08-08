@@ -38,9 +38,9 @@ def walk_textures():
 
 def cache_textures():
     tx: textures = walk_textures()
-    Path(f'{config["texturesPath"]}\\normals.json').write_text(json.dumps(tx.normals, indent=4))
-    Path(f'{config["texturesPath"]}\\masks.json').write_text(json.dumps(tx.masks, indent=4))
-    Path(f'{config["texturesPath"]}\\trs.json').write_text(json.dumps(tx.trs, indent=4))
+    Path(f'linked_resources\\json\\generated\\normals.json').write_text(json.dumps(tx.normals, indent=4))
+    Path(f'linked_resources\\json\\generated\\masks.json').write_text(json.dumps(tx.masks, indent=4))
+    Path(f'linked_resources\\json\\generated\\trs.json').write_text(json.dumps(tx.trs, indent=4))
 
 
 def build_asset(dae_path, quiet=True, timeout_s=30):
