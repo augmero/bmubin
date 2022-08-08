@@ -57,7 +57,7 @@ def init_tk():
     tk_obj.withdraw()
 
 
-def getBlenderPath():
+def get_blender_path():
     if "blenderPath" not in config:
         print('Blender required to run this script, please select the executable')
         exe_filetypes = [('exe', '*.exe'), ('all', '*.*')]
@@ -68,6 +68,22 @@ def getBlenderPath():
         config["blenderPath"] = blender_executable
         with open("mbconfig.json", "w") as write_config:
             json.dump(config, write_config, indent=4)
+
+
+def check_texture_atlas():
+    print('checking for texture atlas')
+    texture_atlases = ['MaterialAlb', 'MaterialCmb']
+    for atlas in texture_atlases:
+        atlas_path = f'linked_resources\\{atlas}_TextureAtlas.png'
+        if not Path(atlas_path).is_file():
+            print(f'{atlas} atlas not found, building')
+            from scripts.asset.build_texture_atlas import build_texture_atlas
+            built = build_texture_atlas(atlas)
+            if not built:
+                return False
+        else:
+            print(f'{atlas} atlas found! Continuing')
+    return True
 
 
 def new_stats():
@@ -208,13 +224,15 @@ def select_task():
 def main():
     init_tk()
     config["dataDir"] = os.path.abspath('data_dir')
-    getBlenderPath()
+    get_blender_path()
     if not config["depsInstalled"]:
         try:
             install_dependencies()
         except:
             print('Dependencies not installed, please try again')
             return
+    if not check_texture_atlas():
+        return
 
     select_task()
 
