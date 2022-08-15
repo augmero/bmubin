@@ -8,6 +8,7 @@ with open("mbconfig.json", "r") as f:
 
 textures_path = config['texturesPath']
 textures_path_abs = os.path.abspath(textures_path)
+terrain_hybrid = True
 
 
 with open(f"linked_resources\\json\\generated\\normals.json", "r") as f:
@@ -157,6 +158,8 @@ def terrain_and_image_shader(object: bpy.types.Object, indices: list):
         normal_image_node.image = normal_image
         normal_image_node.location[0] -= 600
         normal_image_node.location[1] -= 300
+        material_links.new(actor_terrain_image_node.inputs["Normal Image"], normal_image_node.outputs["Color"])
+        material_links.new(shader.inputs["Normal"], actor_terrain_image_node.outputs["Normal"])
     else:
         print('no normals found')
 
@@ -165,10 +168,7 @@ def terrain_and_image_shader(object: bpy.types.Object, indices: list):
     object.active_material.node_tree.nodes.active = base_color
 
     material_links.new(actor_terrain_image_node.inputs["Color"], base_color.outputs["Color"])
-    material_links.new(actor_terrain_image_node.inputs["Normal Image"], normal_image_node.outputs["Color"])
-
     material_links.new(shader.inputs["Base Color"], actor_terrain_image_node.outputs["Color"])
-    material_links.new(shader.inputs["Normal"], actor_terrain_image_node.outputs["Normal"])
 
 
 def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
@@ -334,7 +334,7 @@ def fix_shaders(dae_name):
                 if not base_color:
                     terrain_shader(o, indices)
                     continue
-                elif indices and base_color and 'blend' not in o.name.lower():
+                elif indices and base_color and 'blend' not in o.name.lower() and terrain_hybrid==True:
                     terrain_and_image_shader(o, indices)
                     continue
 
