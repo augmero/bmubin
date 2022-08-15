@@ -3,6 +3,7 @@ import sys
 import os
 import json
 from pathlib import Path
+import bmesh
 
 # fix for python being annoying about imports, maybe not good practice
 # basically adds the root bmubin directory to path
@@ -29,7 +30,7 @@ def save(path):
         print(f'save failed for {path}')
 
 
-def import_dae(path:str):
+def import_dae(path: str):
     print('importing dae')
     # Import DAE
     bpy.ops.wm.collada_import(filepath=path)
@@ -74,6 +75,22 @@ def yes_or_no(default):
         return default
 
 
+def bmesh_cleanup():
+    for object in bpy.data.objects:
+        if object.type != 'MESH':
+            continue
+        object_data = object.data
+        bm = bmesh.new()
+        bm.from_mesh(object_data)
+        # remove duplicate vertices
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=.005)
+        bm.to_mesh(object_data)
+        # remove all loose vertices
+        loose_verts = [v for v in bm.verts if not v.link_faces]
+        for v in loose_verts:
+            bm.verts.remove(v)
+
+
 def main():
     argv = sys.argv
     try:
@@ -101,6 +118,7 @@ def main():
         import_dae(str(new_dae_file_path))
         shader_fixer.fix_shaders(dae_name)
         set_shading_type()
+        bmesh_cleanup()
         armature = bpy.data.objects["Armature"]
         armature.name = dae_name
         root_bone = armature.pose.bones.get("Root")
