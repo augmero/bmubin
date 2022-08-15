@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from tqdm import tqdm
 
 with open("mbconfig.json", "r") as f:
     config = json.load(f)
@@ -50,18 +51,18 @@ def build_asset(dae_path, quiet=True, timeout_s=30):
     launch_file = os.path.abspath('starting_scene\\starting_scene.blend')
     if not os.path.isfile(launch_file):
         launch_file = None
-    args = (config["blenderPath"], launch_file, "--background", "--python",
-            "\\scripts\\asset\\build_asset.py", "--factory-startup", "--", str(dae_path), "--fix_texture_dir", ask_fix_texture_dir)
+    args = (config["blenderPath"], launch_file, "--background", "--python", "\\scripts\\asset\\build_asset.py",
+            "--factory-startup", "--", str(dae_path), "--fix_texture_dir", ask_fix_texture_dir)
     # kinda stinky way to remove any None from the tuple
     args = tuple(x for x in args if x is not None)
 
-    print(args)
+    # print(args)
     sp_stdout = subprocess.PIPE
-    print(quiet)
+    # print(quiet)
     if quiet:
         sp_stdout = subprocess.DEVNULL
     try:
-        sprocess = subprocess.Popen(args, stdout=sp_stdout, universal_newlines=True)
+        sprocess = subprocess.Popen(args, stdout=sp_stdout, stderr=sp_stdout, universal_newlines=True)
         if not quiet:
             for line in sprocess.stdout:
                 print(line.strip())
@@ -70,7 +71,6 @@ def build_asset(dae_path, quiet=True, timeout_s=30):
         print(f'Timeout for {args} ({timeout_s}s) expired', file=sys.stderr)
         sprocess.terminate()
         return 'timeout'
-
     return 'complete'
 
 
@@ -112,22 +112,28 @@ def build_asset_library(quiet=True, timeout=60):
     futures = [executor.submit(build_asset, x, quiet, timeout) for x in assets_to_build]
     num_completed = 0
     num_timeout = 0
-    for future in as_completed(futures):
+
+    tqdm_args = {
+        'total': len(assets_to_build),
+        'leave': False,
+        'dynamic_ncols': True,
+        'colour': 'green',
+        'desc': 'Assets Built'
+    }
+
+    # for future in as_completed(futures):
+    for future in tqdm(as_completed(futures), **tqdm_args):
         # retrieve the result
         res = future.result()
         if res == 'complete':
             num_completed += 1
         else:
             num_timeout += 1
-        if quiet:
-            print(f'Threads completed: {num_completed}')
-            print(f'Threads timed out: {num_timeout}')
-        sys.stdout.flush()
-    print(f'Total number of threads completed: {num_completed}')
+    print(f'\nTotal number of threads completed: {num_completed}')
     print(f'Total number of threads timed out: {num_timeout}')
     end_time = time.time()
     sec = end_time - start_time
-    print(f'\nCompleted in {sec} seconds.')
+    print(f'\nCompleted in {sec} seconds.\n')
 
 
 def build_test_asset():
