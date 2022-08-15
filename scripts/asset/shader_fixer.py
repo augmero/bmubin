@@ -98,13 +98,19 @@ def link_lamp(lamp_name, location=None):
         object.location = location
 
     # parent to armature root bone
-    armature = [o for o in bpy.data.objects if o.type=='ARMATURE'].pop()
+    armature = [o for o in bpy.data.objects if o.type == 'ARMATURE'].pop()
     object.parent = armature
     root_bone = armature.pose.bones.get("Root")
     if root_bone:
         object.parent_bone = 'Root'
         object.parent_type = 'BONE'
     return object
+
+
+def solidify_modifier(object):
+    solidify = object.modifiers.new("Solidify", "SOLIDIFY")
+    solidify.offset = 0
+    solidify.use_rim = False
 
 
 def geometry_nodes_edge(object):
@@ -218,6 +224,7 @@ def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
         # if we're 'translucent' alpha blend the edges
         if object.active_material.blend_method == "BLEND":
             geometry_nodes_edge(object)
+            solidify_modifier(object)
             # color attribute -> invert -> bright/contrast -> clamp
             color_attribute_node = material_nodes.new(type='ShaderNodeVertexColor')
             color_attribute_node.layer_name = 'edge'
@@ -334,7 +341,7 @@ def fix_shaders(dae_name):
                 if not base_color:
                     terrain_shader(o, indices)
                     continue
-                elif indices and base_color and 'blend' not in o.name.lower() and terrain_hybrid==True:
+                elif indices and base_color and 'blend' not in o.name.lower() and terrain_hybrid == True:
                     terrain_and_image_shader(o, indices)
                     continue
 
