@@ -1,19 +1,50 @@
+# THIS SCRIPT RUNS WITHIN BLENDER
 import bpy
-import traceback
-import time
 from pathlib import Path
 import json
-from scripts.classes.session_cache import session_cache
+from scripts.classes.instance_cache import instance_cache
+import sys
+import contextlib
+from tqdm import tqdm
+import math
+import mathutils
+import time
 
 with open("mbconfig.json", "r") as f:
     config = json.load(f)
 
-# THIS SCRIPT RUNS WITHIN BLENDER
+
+class DummyFile(object):
+    # https://stackoverflow.com/questions/36986929/redirect-print-command-in-python-script-through-tqdm-write/37243211#37243211
+    file = None
+
+    def __init__(self, file):
+        self.file = file
+
+    def write(self, x): pass
+    # Avoid print() second call (useless \n)
+    # if len(x.rstrip()) > 0:
+    #     tqdm.write(x, file=self.file)
+
+    def flush(self): pass
+
+
+@contextlib.contextmanager
+def nostdout():
+    save_stdout = sys.stdout
+    sys.stdout = DummyFile(sys.stdout)
+    yield
+    sys.stdout = save_stdout
+
 
 vl_collections = bpy.context.scene.view_layers["ViewLayer"].layer_collection
+layer_collection_cache = {}
+model_instance_counter = {}
+
 
 def include_all_collections():
     exclude_all_collection_view_layer(vl_collections, False)
+
 
 def exclude_all_collection_view_layer(p_collection, exclude):
     for collection in p_collection.children:
@@ -21,254 +52,203 @@ def exclude_all_collection_view_layer(p_collection, exclude):
         if collection.children:
             exclude_all_collection_view_layer(collection, exclude)
 
+
 def retrieve_layer_collection_BFS(layer_collection, collection_name):
     layers = [l for l in layer_collection.children]
-    while len(layers)>0:
+    while len(layers) > 0:
         layer = layers.pop(0)
         if layer.name == collection_name:
+            # print(f'BFS FOUND {collection_name}\n')
             return layer
-        if layer.children and len(layer.children)>0:
+        if layer.children and len(layer.children) > 0:
             layers += layer.children
+    print(f'BFS DID NOT FIND {collection_name}\n')
+    return None
 
-def import_actor(actor: dict, mod_folder: str, cache={}, exported={}, data_dir='', session_cache:session_cache={}):
-    # print('fake import actor')
-    from .io.data import Data
-    """Imports a mubin actor entry using the cached models and relative sbfres files."""
 
-    name = actor['UnitConfigName']
-    dae_file = ''
+def exclude_collection(layer_collection_name, exclude=True):
+    layer_collection_cache[layer_collection_name].exclude = exclude
 
-    # Vanilla actor
-    if name in exported:
-        dae_file = f'{data_dir}\\collada\\{exported[name]["BfresName"]}\\{exported[name]["ModelName"]}.dae'
 
-    # Custom actor already cached
-    elif name in cache:
-        dae_file = f'{data_dir}\\cache\\{cache[name]["BfresName"]}\\{cache[name]["ModelName"]}.dae'
+def add_collection(name, parent=bpy.context.scene.collection):
+    # print(f'{name}, {parent}')
+    context = bpy.context
+    if name not in context.blend_data.collections:
+        # print(f'adding collection {name}')
+        # if parent is a layer collection get the collection it wraps
+        if hasattr(parent, 'collection'):
+            parent = parent.collection
+        collection = context.blend_data.collections.new(name)
+        parent.children.link(collection)
+        layer_collection = retrieve_layer_collection_BFS(vl_collections, name)
+        layer_collection_cache[name] = layer_collection
+    return set_active_collection(name)
 
-    # Custom actor
-    elif Path(f'{mod_folder}\\content\\Actor\\Pack\\{name}.sbactorpack').is_file():
-        Data.cache_actor(Path(f'{mod_folder}\\content\\Actor\\Pack\\{name}.sbactorpack'))
-        dae_file = f'{data_dir}\\bin\\{cache[name]["BfresName"]}\\{cache[name]["ModelName"]}.dae'
 
-    # Actor not found
-    else:
-        print(f'A model for {name}: {actor["HashId"]} could not be found.')
+def set_active_collection(name):
+    context = bpy.context
+    context.view_layer.active_layer_collection = layer_collection_cache[name]
+    return layer_collection_cache[name]
+
+    # scene collection data structure will look like
+    # mn - mubin_name
+    # mn (first 3 chars)
+    # |_
+    #     mn
+    #     |_
+    #         mn_linked
+    #         |_
+    #             mn_{model_name}_linked collection
+    #             |_
+    #                 {model_name} (collection)
+    #                 |_
+    #                     {model_name}.002 (armature)
+    #         mn_linked_Far
+    #         |_
+    #             mn_{model_name}_Instancer collection
+    #             |_
+    #                 mn_{model_name}_Instancer (object)
+    #                 |_
+    #                     {model_name} (linked collection object)
+
+    # Assets to Instance
+    # |_
+    #   Assets to Instance.001
+    #   |_
+    #       {model_name}_Asset collection
+    #       |_
+    #           {model_name} (linked collection object)
+
+
+def import_all_mubins(prefix: str = ''):
+    print('import_all_mubins')
+    start_time = time.time()
+
+    # Add collections for the asset imports
+    col_assets_to_instance = add_collection('Assets')
+    # layer_collection_cache['Assets to Instance'].collection.hide_render = True
+    add_collection('Assets.001', col_assets_to_instance.collection)
+
+    tqdm_args = {
+        'leave': False,
+        'dynamic_ncols': True,
+        'ascii': True,
+        'colour': 'cyan',
+        'desc': 'Mubin',
+        'position': 0
+    }
+    # for mubin, mubin_data in all_caches.items():
+    with open(f"linked_resources\\json\\generated\\instance_caches\\{prefix}_instance_cache.json", "r") as f:
+        all_caches: dict = json.load(f)
+    for mubin, mubin_data in tqdm(all_caches.items(), **tqdm_args):
+        mubin_prefix = mubin[:3]
+        coll_mn_prefix = add_collection(mubin_prefix)
+        coll_mn = add_collection(mubin, coll_mn_prefix)
+
+        models: dict = mubin_data['models']
+        # for key, val in models.items():
+        tqdm_args['position'] = 1
+        tqdm_args['colour'] = 'green'
+        tqdm_args['desc'] = 'Models Instanced'
+        for key, val in tqdm(models.items(), **tqdm_args):
+            key: str = key
+            val: instance_cache.model = val
+            parent_collection = add_collection(f'{mubin}_Instances', coll_mn)
+            if key.endswith('_Far'):
+                parent_collection = add_collection(f'{mubin}_Instances_Far', coll_mn)
+            instantiate_assets(mubin, key, val['positions'], parent_collection)
+
+    # include_all_collections()
+    # include only far lod for intially lightweight viewport, make it one-click easy to enable detailed
+    for cname in layer_collection_cache.keys():
+        if 'Instances' in cname:
+            exclude_collection(cname, False)
+        if 'Instances' in cname and 'Instances_Far' not in cname:
+            exclude_collection(cname)
+
+    end_time = time.time()
+    sec = end_time - start_time
+    print(f'\nCompleted in {sec} seconds.')
+
+
+def instantiate_assets(mubin_name, model_name, positions, parent_collection):
+    link_success = link_asset(model_name)
+    if not link_success:
         return
 
-    model_name = Path(dae_file).stem
-
-    if not session_cache.built_assets.get(model_name):
-        print(f'{model_name} NOT FOUND IN ASSET LIBRARY, SKIPPING')
+    model_asset = bpy.data.objects.get(model_name)
+    if not model_asset:
+        print(f'WARNING: {model_asset} not found')
         return
 
-    armature = None
-    # TODO: fix this
-    append_directory = Path(f"asset_library\\assets\\{model_name}.blend").absolute()
-    append_directory = f'{str(append_directory)}\\Collection\\'
-    print(append_directory)
-    files = [{'name': model_name}]
-    if session_cache.imported_assets.get(model_name):
-        # print(f'EXISTING IMPORT: model {model_name} already imported, importing again')
+    new_collection_name = f'{mubin_name}_{model_name}'
+    link_to_this_coll: bpy.types.Collection = add_collection(new_collection_name, parent_collection).collection
 
-        layer_collection = session_cache.layer_collection_tracker[model_name]['layer_collection']
-        bpy.context.view_layer.active_layer_collection = layer_collection
+    for pos in positions:
+        # print(model_instance_counter)
+        location = pos['location']
+        rotate = pos['rotate']
+        scale = pos['scale']
 
-        session_cache.layer_collection_tracker[model_name]['count'] += 1
+        model_copy: bpy.types.Object = model_asset.copy()
 
-        bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True, do_reuse_local_id=True)
-        bpy.ops.object.make_override_library()
-        
-        suffix = '.'+str(session_cache.layer_collection_tracker[model_name]['count']).zfill(3)
-        armature = bpy.data.objects[model_name+suffix]
+        link_to_this_coll.objects.link(model_copy)
 
-        # deselect all
-        bpy.ops.object.select_all(action='DESELECT')
+        # this is a bit complicated, but it works
+        # useful link for explaining order of matrix operations
+        # https://blender.stackexchange.com/questions/44760/rotate-objects-around-their-origin-along-a-global-axis-scripted-without-bpy-op
+        r_m0 = mathutils.Matrix.Rotation(math.radians(-90), 4, 'X')
+        t_m = mathutils.Matrix.Translation(location)
+        r_m1 = mathutils.Matrix.Rotation(math.radians(90), 4, 'X')
+        r_m2 = mathutils.Euler(rotate).to_matrix().to_4x4()
 
-    else:
-        # print(f'NEW IMPORT: model {model_name}')
-        bpy.ops.object.select_all(action='DESELECT')
+        model_copy.matrix_world = r_m1 @ t_m @ r_m2 @ r_m0
+        model_copy.scale = scale
 
-        # structure will be like
-        # actors (or far LOD)
-        # |_
-        #   model_name collection
-        #   |_
-        #       model_name
-        #       |_
-        #           armature (also named model_name but with some number .001 etc)
-
-        # Create model name collection collection (not a typo)
-        model_name_collection_name = f'{model_name} collection'
-        collection = bpy.context.blend_data.collections.new(model_name_collection_name)
-        bpy.data.collections['Actors'].children.link(collection)
-        layer_collection = retrieve_layer_collection_BFS(vl_collections, model_name_collection_name)
-        bpy.context.view_layer.active_layer_collection = layer_collection
-
-        # cache this collection by model name so it's easier to find when we're duplicating stuff
-        session_cache.layer_collection_tracker[model_name] = {'layer_collection': layer_collection, 'count': 1}
-
-        # link override so we can pose the armature
-        # this is way better than appending for file size and allows for the user to make the data local as needed
-        # link haha
-        bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
-        bpy.ops.object.make_override_library()
-
-
-        # for some reason override libraries makes the armature .001
-        armature = bpy.data.objects[model_name+'.001']
-        session_cache.imported_assets[model_name] = True
-        bpy.ops.object.select_all(action='DESELECT')
-
-    # Set the transform
-    location = actor['Translate']
-    rotate = [0, 0, 0]
-    scale = [1, 1, 1]
-
-    # Get rotation
-    if 'Rotate' in actor:
-        try:
-            rotate = [
-                actor['Rotate'][0],
-                actor['Rotate'][1],
-                actor['Rotate'][2],
-            ]
-        except:
-            rotate = [
-                0.0,
-                actor['Rotate'],
-                0.0,
-            ]
-
-    # Get scale
-    if 'Scale' in actor:
-        try:
-            scale = [
-                actor['Scale'][0],
-                actor['Scale'][2],
-                actor['Scale'][1],
-            ]
-        except:
-            scale = [
-                actor['Scale'],
-                actor['Scale'],
-                actor['Scale'],
-            ]
-
-    # Set transforms
-    bone = None
-    if armature.type == 'ARMATURE':
-        for child_bone in armature.pose.bones:
-            if child_bone.name == 'Root':
-                bone = child_bone
-                break
-            elif child_bone.name == 'Model':
-                bone = child_bone
-                break
-            else:
-                bone = child_bone
-                break
-
-        bone.rotation_mode = 'XYZ'
-        if bone is not None:
-            bone.location = location
-            bone.scale = scale
-            bone.rotation_euler = rotate
-        else:
-            print('Root bone could not be found!')
-    else:
-        print('Imported armature could not be found!')
-
-    # Rename armature
-    # armature.name = f"{name} ({actor['HashId']})"
+        model_instance_counter[model_name] += 1
+        # if model_instance_counter[model_name] > 5:
+        #     break
 
     # exclude collection for performance
-    exclude_layer_collection = session_cache.layer_collection_tracker[model_name]['layer_collection'].children[-1]
-    exclude_layer_collection.exclude = True
-    # deselect all
-    bpy.ops.object.select_all(action='DESELECT')
-    print(f'Imported {name}: {actor["HashId"]} successfully.\n')
-    return
+    exclude_collection(f'{model_name}_Asset')
+    exclude_collection(new_collection_name)
 
 
-def import_mubin(mubin: Path, import_far, session_cache: session_cache):
-    print(f'import_mubin {mubin}')
-    from .io.open_oead import OpenOead
-    from .io.data import Data
-    context = bpy.context
-    Data.init()
-    data_dir = config["dataDir"]
-    cache = Data.cache
-    exported = Data.exported
-    data = OpenOead.from_path(mubin)
-    if not session_cache:
-        print('no session cache?')
-        return
-    
-    # bpy.data.collections['Collection'].name = mubin.stem
+def link_asset(model_name):
+    asset_collection_name = f'{model_name}_Asset'
 
-    content = ''
-    num = range(0)
-    # find the content directory which should be part of the mubin's path
-    for i in num:
-        if Path(f'{mubin}{".//" * (i + 1)}/content').is_dir():
-            content = f'{mubin}{"..//" * (i + 1)}/content'
-            break
+    # asset is likely already imported
+    if model_name not in bpy.data.objects:
+        append_directory = Path(f"asset_library\\assets\\{model_name}.blend").absolute()
+        # make sure there's an asset to append
+        if not append_directory.is_file():
+            print(f'asset file for {model_name} not found')
+            print(f'path: {append_directory}')
+            return 'append failed'
 
-        num = range(i + 1)
+        # make sure we're in the correct collection
+        add_collection(asset_collection_name, layer_collection_cache['Assets.001'])
+        append_directory = f'{str(append_directory)}\\Collection\\'
+        files = [{'name': model_name}]
 
-    if data.type == 'BYML' and data.sub_type == 'MUBIN':
-        start_time = time.time()
-        for actor in data.content['Objs']:
-            print(f'name:{actor["UnitConfigName"]} hashid:{actor["HashId"]}')
-            try:
-                if str(actor["UnitConfigName"]).endswith('_Far'):
-                    if import_far:
-                        # Create Far LOD collection
-                        if 'Far LOD' not in context.blend_data.collections:
-                            collection = context.blend_data.collections.new("Far LOD")
-                            context.scene.collection.children.link(collection)
+        # link haha
+        try:
+            bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
+            model_instance_counter[model_name] = 0
+        except:
+            print('append failed')
+            return 'append failed'
+        bpy.ops.object.select_all(action='DESELECT')
+    else:
+        exclude_collection(asset_collection_name, False)
+    return True
 
-                        # Set context
-                        print(context.view_layer.layer_collection.children)
-                        context.view_layer.active_layer_collection = context.view_layer.layer_collection.children["Far LOD"]
 
-                        # Import actor
-                        import_actor(actor, f'{content}..\\', cache=cache, exported=exported, data_dir=data_dir, session_cache=session_cache)
-                else:
-                    # Create Actors collection
-                    if 'Actors' not in context.blend_data.collections:
-                        collection = context.blend_data.collections.new("Actors")
-                        context.scene.collection.children.link(collection)
-
-                    # Set context
-                    context.view_layer.active_layer_collection = context.view_layer.layer_collection.children["Actors"]
-
-                    # Import actor
-                    import_actor(actor, f'{content}..\\', cache=cache, exported=exported, data_dir=data_dir, session_cache=session_cache)
-            except:
-                print(f'Could not import {actor["UnitConfigName"]}\n{traceback.format_exc()}')
-
-                error = ''
-                if Path(f'{data_dir}\\error.txt').is_file():
-                    error = Path(f'{data_dir}\\error.txt').read_text()
-
-                Path(f'{data_dir}\\error.txt').write_text(
-                    f'{error}Could not import {actor["UnitConfigName"]}\n{traceback.format_exc()}{"- " * 30}\n')
-
-        
-        setupLayout()
-
-        end_time = time.time()
-        sec = end_time - start_time
-        print(f'\nCompleted in {sec} seconds.')
-    return
-
-# this makes the layout viewport show the image textures and extends clipping distance
 def setupLayout():
-    for area in bpy.data.screens["Layout"].areas: 
+    """this makes the layout viewport show the image textures and extends clipping distance"""
+    for area in bpy.data.screens["Layout"].areas:
         if area.type == 'VIEW_3D':
-            for space in area.spaces: 
+            for space in area.spaces:
                 if space.type == 'VIEW_3D':
                     # bpy.ops.view3d.view_all(center=True)
                     space.shading.color_type = 'TEXTURE'
@@ -282,9 +262,9 @@ def main():
     print('importer main')
     return
 
+
 if __name__ == "__main__":
     print(f"{__file__} is being run directly")
     main()
 else:
     print(f"{__file__} is being imported")
-
