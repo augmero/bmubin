@@ -5,14 +5,25 @@ from pathlib import Path
 from scripts.asset.build_asset_library import build_asset_library
 from scripts.asset.build_asset_library import build_asset
 from scripts.mubin.get_stats import mubin_stats
+from scripts.mubin.parser import parse_mubin
+from scripts.classes.instance_cache import instance_cache
 import tkinter as tk
 from tkinter import filedialog
+import sys
+from tqdm import tqdm
+import ujson
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
+
 
 with open("mbconfig.json", "r") as config_load:
     config = json.load(config_load)
     config_load.close()
 
 tk_obj = tk.Tk()
+
+executor = ThreadPoolExecutor()
 
 
 def install_dependencies():
@@ -26,19 +37,23 @@ def install_dependencies():
         Path(f'{config["dataDir"]}\\cache').mkdir()
     Path(f'{config["dataDir"]}\\cache.json').write_text(json.dumps({}))
 
+    needed_folders = [
+        'asset_library',
+        'asset_library\\assets',
+        'asset_library\\mubins_by_prefix',
+        'linked_resources',
+        'linked_resources\\json',
+        'linked_resources\\json\\generated',
+        'linked_resources\\json\\generated\\instance_caches',
+        'collada',
+        'collada_parsed',
+        'textures',
+        'starting_scene',
+    ]
     # set up needed folders
-    if not Path('asset_library').is_dir():
-        Path('asset_library').mkdir()
-    if not Path('asset_library\\assets').is_dir():
-        Path('asset_library\\assets').mkdir()
-    if not Path('collada').is_dir():
-        Path('collada').mkdir()
-    if not Path('collada_parsed').is_dir():
-        Path('collada_parsed').mkdir()
-    if not Path('textures').is_dir():
-        Path('textures').mkdir()
-    if not Path('starting_scene').is_dir():
-        Path('starting_scene').mkdir()
+    for folder in needed_folders:
+        if not Path(folder).is_dir():
+            Path(folder).mkdir()
 
     config["depsInstalled"] = True
     with open("mbconfig.json", "w") as config_load:
@@ -103,8 +118,11 @@ def json_pretty_print(ugly):
 
 def get_stats(mubin_paths):
     stats = new_stats()
-    while len(mubin_paths) > 0:
-        mubin_path = mubin_paths.pop()
+    for i in tqdm(
+            range(len(mubin_paths)),
+            leave=False, dynamic_ncols=True, colour='cyan', position=1, desc='mubin paths'):
+        # for i in range(len(mubin_paths)):
+        mubin_path = mubin_paths[i]
         mubin_stats(Path(mubin_path), True, stats)
     print('_____________________________________')
     print('\n')
@@ -143,64 +161,195 @@ def get_stats(mubin_paths):
     print('\n')
 
 
-def open_helper(func_to_run: str, background=True, arg_list: list = []):
-    print('open_helper')
+def open_helper(func_to_run: str, arg_list: list = [], timeout_s=60, background=True, quiet=True):
+    if not func_to_run:
+        return 'func_to_run param missing'
     bg = None
     if background:
         bg = '--background'
     launch_file = os.path.abspath('starting_scene\\starting_scene.blend')
     if not os.path.isfile(launch_file):
         launch_file = None
-    # log_level = 0
-    # log_level_string = f'--log-level {log_level}'
-    args = (config["blenderPath"], launch_file, bg, "--python",
-            "helper.py", "--factory-startup", "-y", "--", func_to_run)
-    print(args)
+    args = (
+        config["blenderPath"],
+        launch_file,
+        bg,
+        "--python",
+        "helper.py",
+        "--factory-startup",
+        "-y",
+        "--",
+        func_to_run
+    )
     # kinda stinky way to remove any None from the tuple
     args = tuple(x for x in args if x is not None)
     arg_list_tuple = tuple(x for x in arg_list)
     args = args + arg_list_tuple
-    print(args)
 
-    sprocess = subprocess.Popen(args, stdout=subprocess.PIPE, universal_newlines=True)
-    for line in sprocess.stdout:
-        print(line.strip())
-    sprocess.wait()
-    return
+    popen_args = {
+        'stdout': subprocess.PIPE,
+        'universal_newlines': True
+    }
+
+    if quiet:
+        popen_args['stdout'] = subprocess.DEVNULL
+        popen_args['stderr'] = subprocess.DEVNULL
+    try:
+        sprocess = subprocess.Popen(args, **popen_args)
+        if not quiet:
+            for line in sprocess.stdout:
+                line = line.strip()
+                if len(line) > 0 and not 'WARN' in line:
+                    print(line)
+        sprocess.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        print(f'Timeout for {args} ({timeout_s}s) expired', file=sys.stderr)
+        sprocess.terminate()
+        return 'timeout'
+    return 'complete'
 
 
-def run_task(task):
-    print(f'running task {task}')
-    task = str.strip(str(task))
-    if '1' in task:
+def mubins_in_directory(path):
+    ret = []
+    for dirpath, dirnames, files in os.walk(Path(path)):
+        for name in files:
+            if '.smubin' in name:
+                file_path = os.path.abspath(os.path.join(dirpath, name))
+                ret.append(file_path)
+    return ret
+
+
+def organize_paths_by_prefix(paths: list):
+    prefix_cache = {}
+    for path in paths:
+        stem = Path(path).stem
+        prefix = stem[:3]
+        if prefix not in prefix_cache:
+            prefix_cache[prefix] = []
+        prefix_cache[prefix].append(path)
+    return prefix_cache
+
+
+def build_mubin_library(directory, quiet=True, timeout=60):
+    start_time = time.time()
+    print("Building asset library")
+
+    mubins_found = mubins_in_directory(directory)
+
+    # multithreaded caching
+    paths_by_prefix = organize_paths_by_prefix(mubins_found)
+    futures_prefix = [executor.submit(cache_mubins, x, True) for x in paths_by_prefix.values()]
+    for future in as_completed(futures_prefix):
+        res = future.result()
+
+    # multithreaded mubin instancing
+    print(paths_by_prefix.keys())
+    futures_helper = [executor.submit(open_helper, 'import_mubin', [x], timeout, quiet, quiet)
+                      for x in paths_by_prefix.keys()]
+    num_completed = 0
+    num_timeout = 0
+    tqdm_args = {
+        'total': len(paths_by_prefix.keys()),
+        'leave': False,
+        'dynamic_ncols': True,
+        'colour': 'green',
+        'desc': 'Grouped mubins imported'
+    }
+    for future in tqdm(as_completed(futures_helper), **tqdm_args):
+        # for future in as_completed(futures_helper):
+        res = future.result()
+        if res == 'complete':
+            num_completed += 1
+        else:
+            num_timeout += 1
+    print(f'\nTotal number of threads completed: {num_completed}')
+    print(f'Total number of threads timed out: {num_timeout}')
+    end_time = time.time()
+    sec = end_time - start_time
+    print(f'\nCompleted in {sec} seconds.\n')
+
+
+def cache_mubins(mubin_paths: list, by_prefix=True):
+    p_caches = {}
+    for mubin_path in mubin_paths:
+        p_cache = instance_cache()
+        stem = Path(mubin_path).stem
+        parse_mubin(Path(mubin_path), True, p_cache)
+        if by_prefix:
+            prefix = stem[:3]
+            if prefix not in p_caches:
+                p_caches[prefix] = {}
+            p_caches[prefix][stem] = p_cache
+        else:
+            p_caches[stem] = p_cache
+
+    if by_prefix:
+        for prefix, mubins in p_caches.items():
+            dumpJson = json.loads(json.dumps(mubins, default=lambda o: o.__dict__))
+            with open(f"linked_resources\\json\\generated\\instance_caches\\{prefix}_instance_cache.json", "w") as write_instance_cache:
+                # this can be a very big json (20mb) so using ujson
+                ujson.dump(dumpJson, write_instance_cache)
+                write_instance_cache.close()
+        return p_caches.keys()
+    else:
+        dumpJson = json.loads(json.dumps(p_caches, default=lambda o: o.__dict__))
+        with open(f"linked_resources\\json\\generated\\instance_caches\\_instance_cache.json", "w") as write_instance_cache:
+            # this can be a very big json (20mb) so using ujson
+            ujson.dump(dumpJson, write_instance_cache)
+            write_instance_cache.close()
+
+
+task_list = [
+    'build asset library',
+    'build single asset',
+    'build mubin library from directory',
+    'import mubin(s)',
+    'mubin(s) stats'
+]
+
+
+def run_task(task_input):
+    print(f'running task {task_input}')
+    task_input = str.strip(str(task_input))
+    if 'x' in task_input:
+        return 'quit'
+    task_index = int(task_input)
+    if not task_index or task_index < 1:
+        return 'quit'
+    task_index -= 1
+    task = task_list[task_index]
+
+    if 'build asset library' in task:
         # If lots of threads are timing out try raising this timeout value it's in seconds
         # Possibly test one of the larger files to see how long it takes
         #  (DgnObj_DLC_IbutsuEx_BossBattleRoom_A_01)
         build_asset_library(quiet=True, timeout=60)
-    elif '2' in task:
+    elif 'build single asset' in task:
         dae_filetypes = [('collada', '*.dae'), ('all', '*.*')]
         dae_file = filedialog.askopenfilename(filetypes=dae_filetypes)
         if not dae_file:
-            print('No file selected, back to main menu')
-            select_task()
-            return
+            return ('not selected', 'No file')
         build_asset(dae_file, quiet=False, timeout_s=60)
-    elif '3' in task or '4' in task:
+    elif 'build mubin library' in task:
+        print('Please open directory with all the mubins in it')
+        print('for example, look for \\content\\0010\\Map\\MainField')
+        mubin_directory = filedialog.askdirectory()
+        if not mubin_directory:
+            return ('not selected', 'No directory')
+        build_mubin_library(mubin_directory)
+    elif 'import mubin' in task or 'mubin(s) stats' in task:
         mubin_filetypes = [('mubin', '*.smubin'), ('all', '*.*')]
         mubin_paths = filedialog.askopenfilenames(filetypes=mubin_filetypes)
         if not mubin_paths:
-            print('No paths selected, back to main menu')
-            select_task()
-            return
+            return ('not selected', 'No paths')
         if not isinstance(mubin_paths, list):
             mubin_paths = list(mubin_paths)
         print(mubin_paths)
-        if '3' in task:
-            open_helper('import_mubin', True, mubin_paths)
-        elif '4' in task:
+        if 'import mubin' in task:
+            cache_mubins(mubin_paths, by_prefix=False)
+            open_helper('import_mubin', timeout_s=60, background=True, quiet=False)
+        elif 'mubin(s) stats' in task:
             get_stats(mubin_paths)
-    elif 'x' in task:
-        return
     else:
         print('Command not recognized, back to main menu')
         select_task()
@@ -208,17 +357,20 @@ def run_task(task):
 
 def select_task():
     print('\nWelcome to the mubin_to_blender script task selection system')
-    print('1: build asset library')
-    print('2: build single asset')
-    print('3: import mubin(s)')
-    print('4: mubin(s) stats')
+    for i in range(len(task_list)):
+        print(f'{i+1}: {task_list[i]}')
     print('x: exit')
     selected_task = 'x'
     try:
         selected_task = input("Choose something to do: ")
     except KeyboardInterrupt:
         print('keyboard interrupt')
-    run_task(selected_task)
+    result = run_task(selected_task)
+    if type(result) is tuple:
+        result: tuple = result
+        if result[0] == 'not selected':
+            print(f'{result[1]} selected, back to main menu')
+            select_task()
 
 
 def main():
@@ -235,8 +387,6 @@ def main():
         return
 
     select_task()
-
-    # open_helper('gen_slice_nodes', False)
 
 
 if __name__ == "__main__":

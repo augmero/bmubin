@@ -1,2 +1,5 @@
 fake_bpy_module_latest==20220629
 oead==1.2.4.post2
+Pillow==9.2.0
+tqdm==4.64.0
+ujson==5.4.0
