@@ -299,19 +299,23 @@ def cache_mubins(mubin_paths: list, by_prefix=True):
             write_instance_cache.close()
 
 
-task_list = {
-    'extra info about these scripts': 'Just prints some extra info',
-    'build asset library': 'Builds asset blend files for each dae file present in .collada\\ \n(multithreaded)',
-    'build single asset': 'Builds an asset blend file in .asset_library\\ for a selected dae file',
-    'build mubin library from directory':
-    'Builds a blend file out of instanced assets for every smubin found in the directory selected \n(multithreaded)',
-    'import mubin(s)': 'Builds a blend file out of instanced assets for selected mubins',
-    'mubin(s) stats': 'Prints out some useful stats about selected mubin(s)',
-    'combine mubin blend libraries':
-    'Creates .asset_library\\combined_blends.blend by including instances of the selected blend files by prefix (ex I-7)' + \
-    '\nMap: https://objmap.zeldamods.org Enable "show map unit grid" under filter on this site to see the meaning of these prefixes' + \
-    '\nWarning, many of these in one file will have worse performance and higher ram usage'
-}
+task_list = [
+    {'task': 'extra info about these scripts', 'desc': 'Just prints some extra info'},
+    {'task': 'toggle terrain hybrid',
+     'desc': 'Toggles hybrid terrain shader for built assets, looks good for some but is broken in many others'},
+    {'task': 'build asset library',
+     'desc': 'Builds asset blend files for each dae file present in .collada\\ \n(multithreaded)'},
+    {'task': 'build single asset', 'desc': 'Builds an asset blend file in .asset_library\\ for a selected dae file'},
+    {'task': 'build mubin library from directory',
+     'desc':
+     'Builds a blend file out of instanced assets for every smubin found in the directory selected \n(multithreaded)'},
+    {'task': 'import mubin(s)', 'desc': 'Builds a blend file out of instanced assets for selected mubins'},
+    {'task': 'mubin(s) stats', 'desc': 'Prints out some useful stats about selected mubin(s)'},
+    {'task': 'combine mubin blend libraries',
+     'desc':
+     'Creates .asset_library\\combined_blends.blend by including instances of the selected blend files by prefix (ex I-7) \
+     \nMap: https://objmap.zeldamods.org Enable "show map unit grid" under filter on this site to see the meaning of these prefixes \
+     \nWarning, many of these in one file will have worse performance and higher ram usage'}]
 
 
 def print_task_list_info():
@@ -319,10 +323,33 @@ def print_task_list_info():
     print('____________________________________')
     print('Currently available utilities:')
     print('\n')
-    for i in range(len(task_list.keys())):
-        print(f'{i+1}: {list(task_list.keys())[i]}')
-        print(list(task_list.values())[i])
+    for i in range(len(task_list)):
+        task = task_list[i]
+        print(f'{i+1}: {task.get("task")}')
+        print(task.get('desc'))
         print('\n')
+
+
+def get_task_list():
+    if 'terrainHybrid' not in config:
+        config['terrainHybrid'] = False
+        with open("mbconfig.json", "w") as config_write:
+            json.dump(config, config_write, indent=4)
+            config_write.close()
+    terrain_hybrid = config['terrainHybrid']
+    for task in task_list:
+        if 'terrain hybrid' in task.get('task'):
+            if terrain_hybrid:
+                task['task'] = 'disable terrain hybrid'
+            else:
+                task['task'] = 'enable terrain hybrid'
+
+
+def toggle_terrain_hybrid():
+    config['terrainHybrid'] = not config['terrainHybrid']
+    with open("mbconfig.json", "w") as config_write:
+        json.dump(config, config_write, indent=4)
+        config_write.close()
 
 
 def run_task(task_input):
@@ -334,10 +361,13 @@ def run_task(task_input):
     if not task_index or task_index < 1:
         return 'quit'
     task_index -= 1
-    task = list(task_list.keys())[task_index]
+    task = task_list[task_index].get('task')
 
     if 'extra info about' in task:
         print_task_list_info()
+        select_task()
+    elif 'terrain hybrid' in task:
+        toggle_terrain_hybrid()
         select_task()
     elif 'build asset library' in task:
         # If lots of threads are timing out try raising this timeout value it's in seconds
@@ -386,8 +416,10 @@ def run_task(task_input):
 
 def select_task():
     print('\nWelcome to the mubin_to_blender script task selection system')
-    for i in range(len(task_list.keys())):
-        print(f'{i+1}: {list(task_list.keys())[i]}')
+    get_task_list()
+    for i in range(len(task_list)):
+        task = task_list[i]
+        print(f'{i+1}: {task.get("task")}')
     print('x: exit')
     selected_task = 'x'
     try:
