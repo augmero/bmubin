@@ -299,13 +299,30 @@ def cache_mubins(mubin_paths: list, by_prefix=True):
             write_instance_cache.close()
 
 
-task_list = [
-    'build asset library',
-    'build single asset',
-    'build mubin library from directory',
-    'import mubin(s)',
-    'mubin(s) stats'
-]
+task_list = {
+    'extra info about these scripts': 'Just prints some extra info',
+    'build asset library': 'Builds asset blend files for each dae file present in .collada\\ \n(multithreaded)',
+    'build single asset': 'Builds an asset blend file in .asset_library\\ for a selected dae file',
+    'build mubin library from directory':
+    'Builds a blend file out of instanced assets for every smubin found in the directory selected \n(multithreaded)',
+    'import mubin(s)': 'Builds a blend file out of instanced assets for selected mubins',
+    'mubin(s) stats': 'Prints out some useful stats about selected mubin(s)',
+    'combine mubin blend libraries':
+    'Creates .asset_library\\combined_blends.blend by including instances of the selected blend files by prefix (ex I-7)' + \
+    '\nMap: https://objmap.zeldamods.org Enable "show map unit grid" under filter on this site to see the meaning of these prefixes' + \
+    '\nWarning, many of these in one file will have worse performance and higher ram usage'
+}
+
+
+def print_task_list_info():
+    print('\n')
+    print('____________________________________')
+    print('Currently available utilities:')
+    print('\n')
+    for i in range(len(task_list.keys())):
+        print(f'{i+1}: {list(task_list.keys())[i]}')
+        print(list(task_list.values())[i])
+        print('\n')
 
 
 def run_task(task_input):
@@ -317,9 +334,12 @@ def run_task(task_input):
     if not task_index or task_index < 1:
         return 'quit'
     task_index -= 1
-    task = task_list[task_index]
+    task = list(task_list.keys())[task_index]
 
-    if 'build asset library' in task:
+    if 'extra info about' in task:
+        print_task_list_info()
+        select_task()
+    elif 'build asset library' in task:
         # If lots of threads are timing out try raising this timeout value it's in seconds
         # Possibly test one of the larger files to see how long it takes
         #  (DgnObj_DLC_IbutsuEx_BossBattleRoom_A_01)
@@ -350,6 +370,15 @@ def run_task(task_input):
             open_helper('import_mubin', timeout_s=60, background=True, quiet=False)
         elif 'mubin(s) stats' in task:
             get_stats(mubin_paths)
+    elif 'combine mubin blend libraries' in task:
+        blend_filetypes = [('blend', '*.blend'), ('all', '*.*')]
+        initial_dir = 'asset_library\\mubins_by_prefix'
+        blend_paths = filedialog.askopenfilenames(filetypes=blend_filetypes, initialdir=initial_dir)
+        if not blend_paths:
+            return ('not selected', 'No paths')
+        if not isinstance(blend_paths, list):
+            blend_paths = list(blend_paths)
+        open_helper('combine_blends', arg_list=blend_paths, timeout_s=500, background=True, quiet=False)
     else:
         print('Command not recognized, back to main menu')
         select_task()
@@ -357,8 +386,8 @@ def run_task(task_input):
 
 def select_task():
     print('\nWelcome to the mubin_to_blender script task selection system')
-    for i in range(len(task_list)):
-        print(f'{i+1}: {task_list[i]}')
+    for i in range(len(task_list.keys())):
+        print(f'{i+1}: {list(task_list.keys())[i]}')
     print('x: exit')
     selected_task = 'x'
     try:
