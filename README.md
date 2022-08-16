@@ -30,13 +30,15 @@ Python
 ### Starting Scene
 If you want to use a blend file as the base for making an asset or importing a mubin, rename it to starting_scene.blend and put it in the starting_scene folder!
 
-This is also a good way of importing a mubin to an existing blend file. You can also append the root collection from the generated file but it'll take forever Just make sure before you do this to exclude all your collections from the scene (the checkbox in the outliner, not the TV or the eyeball or the camera) to make the script run as fast as possible
+This is also a good way of importing a mubin to an existing blend file. You can also append the root collection from the generated files but it may take a while. Make sure to exclude all collections from the scene (the checkbox in the outliner, not the TV or the eyeball or the camera) to make the script run as fast as possible
 
 ### Install Python Dependencies
 <code>pip install -r requirements.txt</code>
 
 ## Run
 <code>python.exe blender_mubin_tools.py</code>
+
+The script will give some options and information. Make sure to build the asset library before attempting to import mubins otherwise there will be no assets to instance!
 
 ### Generated files
 The asset library will be saved in the asset_library/assets folder
@@ -48,11 +50,11 @@ The blend files with imported mubins will be saved in the asset_library/ folder
 
 This has only been tested with BotW for now but might work for others
 
-many scripts in /scripts are not tested to run on their own, all are intended to be run by mubin_to_blender.py
+many scripts in /scripts are not tested to run on their own, all are intended to be run by blender_mubin_tools.py
 
 helper.py - runs as a script inside blender, helps with the sys path for imports
 
-Blender plugin? Not currently, making this into a plugin would be diffcult
+Blender plugin? Not currently
 
 
 ## References 

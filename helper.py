@@ -118,6 +118,11 @@ def main():
             run_importer(prefix)
             load_override_script()
             save(f'{save_path}.blend')
+        elif func_to_run == 'combine_blends':
+            from scripts.asset.combine_blend_files import combine_mubins
+            combine_mubins(argv[1:])
+            save_path += 'combined_blends'
+            save(f'{save_path}.blend')
     else:
         print('Try calling one of the available functions')
     return
