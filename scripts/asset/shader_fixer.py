@@ -8,7 +8,7 @@ with open("mbconfig.json", "r") as f:
 
 textures_path = config['texturesPath']
 textures_path_abs = os.path.abspath(textures_path)
-terrain_hybrid = True
+terrain_hybrid = config['terrainHybrid']
 
 
 with open(f"linked_resources\\json\\generated\\normals.json", "r") as f:
