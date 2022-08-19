@@ -77,7 +77,7 @@ def import_actor(actor: dict, mod_folder: str, cache={}, exported={}, data_dir='
     return
 
 
-def mubin_stats(mubin: Path, import_far, stats):
+def mubin_stats(mubin: Path, import_far, stats, find_actor = None):
     from .io.open_oead import OpenOead
     from .io.data import Data
     context = bpy.context
@@ -110,6 +110,18 @@ def mubin_stats(mubin: Path, import_far, stats):
         for actor in tqdm(data.content['Objs'], **tqdm_args):
             with nostdout():
                 print(f'name:{actor["UnitConfigName"]} hashid:{actor["HashId"]}')
+                if find_actor:
+                    name = actor["UnitConfigName"]
+                    vanilla_actor = exported.get(name)
+                    if not vanilla_actor:
+                        continue
+                    model_name = vanilla_actor.get("ModelName")
+                    if not model_name:
+                        continue
+                    if find_actor.lower() in model_name.lower():
+                        return model_name
+                    if find_actor.lower() in name.lower():
+                        return name
                 try:
                     if str(actor["UnitConfigName"]).endswith('_Far'):
                         if import_far:
