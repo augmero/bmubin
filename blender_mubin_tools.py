@@ -350,7 +350,7 @@ def print_task_list_info():
 
 def get_task_list():
     if 'terrainHybrid' not in config:
-        config['terrainHybrid'] = False
+        config['terrainHybrid'] = True
         with open("mbconfig.json", "w") as config_write:
             json.dump(config, config_write, indent=4)
             config_write.close()
