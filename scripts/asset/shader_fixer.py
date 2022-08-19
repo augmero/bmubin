@@ -23,52 +23,88 @@ with open(f"linked_resources\\json\\assets_info.json", "r") as f:
     assets_info: dict = json.load(f)
 
 
-def terrain_shader(object: bpy.types.Object, indices: list):
+# common patterns for shaderOptionsIndexArray (made from uking_texture_array_texture)
+# shader_patterns = {
+#     "[0, 1, 1, -1, -1, -1]": 400,
+#     "[0, 1, -1, -1, -1, -1]": 116,
+#     "[0, 1, 0, 1, 0, -1]": 350,
+#     "[-1, -1, 0, 1, 0, -1]": 355,
+#     "[0, 1, 0, 1, -1, -1]": 5,
+#     "[0, -1, 0, 1, 0, -1]": 17,
+#     "[-1, 1, 1, -1, -1, -1]": 4,
+#     "[-1, 1, -1, 1, -1, -1]": 4,
+#     "[0, 1, -1, 1, -1, -1]": 1,
+#     "[-1, 1, 0, 1, 0, -1]": 3,
+#     "[0, -1, -1, -1, -1, -1]": 5,
+#     "[0, -1, 1, 0, 1, -1]": 2,
+#     "[-1, -1, 0, -1, 0, -1]": 2,
+#     "[1, 1, 0, 1, -1, -1]": 1
+# }
+
+
+def terrain_shader(object: bpy.types.Object, indices: list, soindices: list, existing_image: bool = False):
+    if indices and soindices:
+        material0 = -5
+        material1 = -5
+        # index 6 is always the same, I don't think it's used for anything
+        for index in range(5):
+            textureIndex = indices[index]
+            soIndex = soindices[index]
+            if soIndex == -1:
+                continue
+            elif material0 == -5 and soIndex == 0 and textureIndex != material1:
+                material0 = textureIndex
+                continue
+            elif material1 == -5 and soIndex == 1 and textureIndex != material0:
+                material1 = textureIndex
+        print(f'material0: {material0}')
+        print(f'material1: {material1}')
+        object["scale"] = .1
+        object["material0"] = material0
+        if existing_image:
+            terrain_and_image_shader(object)
+        elif material1 == -5:
+            terrain_shader_apply(object, dual=False)
+        else:
+            object["material1"] = material1
+            terrain_shader_apply(object, dual=True)
+    else:
+        terrain_shader_secondary(object)
+
+
+def terrain_shader_apply(object: bpy.types.Object, dual: bool = True):
     # Default terrain shader, mixes two terrains textures together by the vertex color and edge detection
     # if there's only 1 uv map add another for the terrain shader
-    if len(object.data.uv_layers) == 1:
-        object.data.uv_layers.new(name="UVMap1")
+    terrain_material_name = 'BotW_Actor_Terrain_Single'
+    if dual:
+        terrain_material_name = 'BotW_Actor_Terrain_Dual'
+        if len(object.data.uv_layers) == 1:
+            object.data.uv_layers.new(name="UVMap1")
+
+    if object.active_material.blend_method == "BLEND":
+        # translucent terrain shader
+        terrain_material_name += '_translucent'
+        # set to smooth shading
+        object.data.polygons.foreach_set('use_smooth',  [True] * len(object.data.polygons))
+
     # rename the uv maps for the shader
     for index, uvmap in enumerate(object.data.uv_layers):
         uvmap.name = f'UVMap{index}'
-    # get the array indices from texture_array_indices.json
-    print(indices)
-    if indices:
-        # actor terrain material maybe already imported
-        actor_terrain_material = bpy.data.materials.get('BotW_Actor_Terrain')
+    # actor terrain material maybe already imported
+    actor_terrain_material = bpy.data.materials.get(terrain_material_name)
 
-        if not actor_terrain_material:
-            # import the actor terrain material from actor_terrain_material.blend
-            append_directory = Path(f"linked_resources\\linked.blend").absolute()
-            append_directory = f'{str(append_directory)}\\Material\\'
-            files = [{'name': 'BotW_Actor_Terrain'}]
-            bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
-        actor_terrain_material = bpy.data.materials.get('BotW_Actor_Terrain')
+    if not actor_terrain_material:
+        # import the actor terrain material from actor_terrain_material.blend
+        append_directory = Path(f"linked_resources\\linked.blend").absolute()
+        append_directory = f'{str(append_directory)}\\Material\\'
+        files = [{'name': terrain_material_name}]
+        bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
+    actor_terrain_material = bpy.data.materials.get(terrain_material_name)
 
-        # replace the material with the actor terrain one
-        object.active_material = actor_terrain_material
+    # replace the material with the actor terrain one
+    object.active_material = actor_terrain_material
 
-        # set up custom properties for material0 and material1
-        # the shader uses these to determine which terrain texture to use, and then mixes them by vertex color
-        material0 = 0
-        material1 = 0
-        while(len(indices) > 0):
-            index = indices.pop(0)
-            if index != 0:
-                if material0 == 0:
-                    material0 = index
-                elif material1 == 0 and material0 != index:
-                    material1 = index
-                    break
-        # yes I swapped them instead of fixing the algo
-        object["material0"] = material1
-        object["material1"] = material0
-        object["scale"] = .1
-
-        geometry_nodes_edge(object)
-
-    else:
-        terrain_shader_secondary(object)
+    geometry_nodes_edge(object)
 
 
 def append_node_tree(node_group_name):
@@ -108,32 +144,37 @@ def link_lamp(lamp_name, location=None):
 
 
 def solidify_modifier(object):
-    solidify = object.modifiers.new("Solidify", "SOLIDIFY")
-    solidify.offset = 0
-    solidify.use_rim = False
+    if not object.modifiers.get('Solidify'):
+        solidify = object.modifiers.new("Solidify", "SOLIDIFY")
+        solidify.offset = 0
+        solidify.use_rim = False
+        return True
+    return False
 
 
 def geometry_nodes_edge(object):
-    # geometry nodes
-    object.data.color_attributes.new('edge', 'FLOAT_COLOR', 'CORNER')
-    gn_edge = append_node_tree('GN - Edge')
-    gn_modifier = object.modifiers.new("GN Edge", "NODES")
-    gn_modifier["Output_3_attribute_name"] = "edge"
-    gn_modifier.node_group = gn_edge
+    object: bpy.types.Object = object
+    if not object.modifiers.get('GN - Edge'):
+        # geometry nodes
+        object.data.color_attributes.new('edge', 'FLOAT_COLOR', 'CORNER')
+        gn_edge = append_node_tree('GN - Edge')
+        gn_modifier = object.modifiers.new("GN Edge", "NODES")
+        gn_modifier["Output_3_attribute_name"] = "edge"
+        gn_modifier.node_group = gn_edge
+        return True
+    return False
 
 
-def terrain_and_image_shader(object: bpy.types.Object, indices: list):
+def terrain_and_image_shader(object: bpy.types.Object):
     # mix terrain and one image shader
     print('\n\n\n')
     print('terrain and image shader')
-    print(indices)
     # append link the node group
     # link image and normal to the node group
     # link node group to shader
     # nodetree maybe already imported
 
     # custom props
-    object["material0"] = indices[0]
     object["scale"] = .1
 
     material_nodes = object.active_material.node_tree.nodes
@@ -177,8 +218,37 @@ def terrain_and_image_shader(object: bpy.types.Object, indices: list):
     material_links.new(shader.inputs["Base Color"], actor_terrain_image_node.outputs["Color"])
 
 
+def alpha_blend_edges(object, material_nodes, material_links, shader):
+    # if we're 'translucent' alpha blend the edges
+    if 'paint' in object.name.lower():
+        return
+    if object.active_material.blend_method == "BLEND":
+        geometry_nodes_edge(object)
+        if not solidify_modifier(object):
+            return
+        # color attribute -> invert -> bright/contrast -> clamp
+        color_attribute_node = material_nodes.new(type='ShaderNodeVertexColor')
+        color_attribute_node.layer_name = 'edge'
+        color_attribute_node.location[0] -= 1200
+
+        invert_node = material_nodes.new(type='ShaderNodeInvert')
+        invert_node.location[0] -= 900
+        material_links.new(invert_node.inputs["Color"], color_attribute_node.outputs["Color"])
+
+        bright_contrast_node = material_nodes.new(type='ShaderNodeBrightContrast')
+        bright_contrast_node.inputs["Bright"].default_value = -2
+        bright_contrast_node.inputs["Contrast"].default_value = 4
+        bright_contrast_node.location[0] -= 600
+        material_links.new(bright_contrast_node.inputs["Color"], invert_node.outputs["Color"])
+
+        clamp_node = material_nodes.new(type='ShaderNodeClamp')
+        clamp_node.location[0] -= 300
+        material_links.new(clamp_node.inputs["Value"], bright_contrast_node.outputs["Color"])
+        material_links.new(shader.inputs["Alpha"], clamp_node.outputs["Result"])
+
+
 def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
-    print(f'terrain_shader {image_stem}')
+    print(f'terrain_shader_secondary {image_stem}')
     material_nodes = object.active_material.node_tree.nodes
     material_links = object.active_material.node_tree.links
     shader = material_nodes.get('Principled BSDF')
@@ -220,30 +290,7 @@ def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
             material_links.new(shader.inputs["Normal"], bump.outputs["Normal"])
         else:
             print(f'image load failed for {normal_image_name}')
-
-        # if we're 'translucent' alpha blend the edges
-        if object.active_material.blend_method == "BLEND":
-            geometry_nodes_edge(object)
-            solidify_modifier(object)
-            # color attribute -> invert -> bright/contrast -> clamp
-            color_attribute_node = material_nodes.new(type='ShaderNodeVertexColor')
-            color_attribute_node.layer_name = 'edge'
-            color_attribute_node.location[0] -= 1200
-
-            invert_node = material_nodes.new(type='ShaderNodeInvert')
-            invert_node.location[0] -= 900
-            material_links.new(invert_node.inputs["Color"], color_attribute_node.outputs["Color"])
-
-            bright_contrast_node = material_nodes.new(type='ShaderNodeBrightContrast')
-            bright_contrast_node.inputs["Bright"].default_value = -2
-            bright_contrast_node.inputs["Contrast"].default_value = 4
-            bright_contrast_node.location[0] -= 600
-            material_links.new(bright_contrast_node.inputs["Color"], invert_node.outputs["Color"])
-
-            clamp_node = material_nodes.new(type='ShaderNodeClamp')
-            clamp_node.location[0] -= 300
-            material_links.new(clamp_node.inputs["Value"], bright_contrast_node.outputs["Color"])
-            material_links.new(shader.inputs["Alpha"], clamp_node.outputs["Result"])
+        alpha_blend_edges(object, material_nodes, material_links, shader)
 
     else:
         # approximate the closest possible terrain texture, for instance some of the objects have similar names or are misspelled
@@ -338,11 +385,13 @@ def fix_shaders(dae_name):
                 else:
                     o.active_material.blend_method = "HASHED"
                 indices: list = mat_info.get('indexArray')
-                if not base_color:
-                    terrain_shader(o, indices)
-                    continue
-                elif indices and base_color and 'blend' not in o.name.lower() and terrain_hybrid == True:
-                    terrain_and_image_shader(o, indices)
+                soindices: list = mat_info.get('shaderOptionsIndexArray')
+                existing_image = False
+                if base_color:
+                    existing_image = True
+                if indices and soindices and terrain_hybrid:
+                    terrain_shader(o, indices, soindices, existing_image)
+                    alpha_blend_edges(o, material_nodes, material_links, shader)
                     continue
 
         if base_color:
@@ -450,3 +499,4 @@ def fix_shaders(dae_name):
         else:
             print('no base color found, trying terrain shader')
             terrain_shader_secondary(o)
+        alpha_blend_edges(o, material_nodes, material_links, shader)

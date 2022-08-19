@@ -44,25 +44,40 @@ def cache_textures():
     Path(f'linked_resources\\json\\generated\\trs.json').write_text(json.dumps(tx.trs, indent=4))
 
 
-def build_asset(dae_path, quiet=True, timeout_s=30):
+def build_asset(dae_path, quiet=True, background=True, timeout_s=30):
     ask_fix_texture_dir = '--ask_fix_texture_dir'
+    bg = None
     if quiet:
         ask_fix_texture_dir = ''
+    if background:
+        bg = '--background'
     launch_file = os.path.abspath('starting_scene\\starting_scene.blend')
     if not os.path.isfile(launch_file):
         launch_file = None
-    args = (config["blenderPath"], launch_file, "--background", "--python", "\\scripts\\asset\\build_asset.py",
-            "--factory-startup", "--", str(dae_path), "--fix_texture_dir", ask_fix_texture_dir)
+    args = (
+        config["blenderPath"],
+        launch_file,
+        bg,
+        "--python",
+        "scripts\\asset\\build_asset.py",
+        "--factory-startup",
+        "--", 
+        str(dae_path), 
+        "--fix_texture_dir", 
+        ask_fix_texture_dir
+    )
     # kinda stinky way to remove any None from the tuple
     args = tuple(x for x in args if x is not None)
 
-    # print(args)
-    sp_stdout = subprocess.PIPE
-    # print(quiet)
+    popen_args = {
+        'stdout': subprocess.PIPE,
+        'universal_newlines': True
+    }
     if quiet:
-        sp_stdout = subprocess.DEVNULL
+        popen_args['stdout'] = subprocess.DEVNULL
+        popen_args['stderr'] = subprocess.DEVNULL
     try:
-        sprocess = subprocess.Popen(args, stdout=sp_stdout, stderr=sp_stdout, universal_newlines=True)
+        sprocess = subprocess.Popen(args, **popen_args)
         if not quiet:
             for line in sprocess.stdout:
                 print(line.strip())
@@ -109,7 +124,7 @@ def build_asset_library(quiet=True, timeout=60):
     print("Building asset library")
     cache_textures()
     assets_to_build = assets_to_build_flawed()
-    futures = [executor.submit(build_asset, x, quiet, timeout) for x in assets_to_build]
+    futures = [executor.submit(build_asset, x, quiet, True, timeout) for x in assets_to_build]
     num_completed = 0
     num_timeout = 0
 

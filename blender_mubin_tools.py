@@ -116,11 +116,28 @@ def json_pretty_print(ugly):
     print(json.dumps(ugly, sort_keys=True, indent=4))
 
 
+def find_actor(directory, name):
+    name: str = name.strip()
+    stats = new_stats()
+    mubin_paths = mubins_in_directory(directory)
+    for path in mubin_paths:
+        found = mubin_stats(Path(path), True, stats, name)
+        if found:
+            print(path)
+            print(f'Found: {found}')
+    print('Search complete, string found only in mubins listed above')
+
+
 def get_stats(mubin_paths):
     stats = new_stats()
-    for i in tqdm(
-            range(len(mubin_paths)),
-            leave=False, dynamic_ncols=True, colour='cyan', position=1, desc='mubin paths'):
+    tqdm_args = {
+        'leave': False,
+        'dynamic_ncols': True,
+        'colour': 'cyan',
+        'position': 1,
+        'desc': 'mubin paths'
+    }
+    for i in tqdm(range(len(mubin_paths)), **tqdm_args):
         # for i in range(len(mubin_paths)):
         mubin_path = mubin_paths[i]
         mubin_stats(Path(mubin_path), True, stats)
@@ -311,6 +328,7 @@ task_list = [
      'Builds a blend file out of instanced assets for every smubin found in the directory selected \n(multithreaded)'},
     {'task': 'import mubin(s)', 'desc': 'Builds a blend file out of instanced assets for selected mubins'},
     {'task': 'mubin(s) stats', 'desc': 'Prints out some useful stats about selected mubin(s)'},
+    {'task': 'find actor in mubin(s)', 'desc': 'Searches every mubin in directory selected for input string'},
     {'task': 'combine mubin blend libraries',
      'desc':
      'Creates .asset_library\\combined_blends.blend by including instances of the selected blend files by prefix (ex I-7) \
@@ -332,7 +350,7 @@ def print_task_list_info():
 
 def get_task_list():
     if 'terrainHybrid' not in config:
-        config['terrainHybrid'] = False
+        config['terrainHybrid'] = True
         with open("mbconfig.json", "w") as config_write:
             json.dump(config, config_write, indent=4)
             config_write.close()
@@ -379,7 +397,7 @@ def run_task(task_input):
         dae_file = filedialog.askopenfilename(filetypes=dae_filetypes)
         if not dae_file:
             return ('not selected', 'No file')
-        build_asset(dae_file, quiet=False, timeout_s=60)
+        build_asset(dae_file, quiet=False, background=False, timeout_s=60)
     elif 'build mubin library' in task:
         print('Please open directory with all the mubins in it')
         print('for example, look for \\content\\0010\\Map\\MainField')
@@ -387,6 +405,14 @@ def run_task(task_input):
         if not mubin_directory:
             return ('not selected', 'No directory')
         build_mubin_library(mubin_directory)
+    elif 'find actor in mubin' in task:
+        name = input("String to search for: ")
+        print('Please open directory with all the mubins in it')
+        print('for example, look for \\content\\0010\\Map\\MainField')
+        mubin_directory = filedialog.askdirectory()
+        if not mubin_directory:
+            return ('not selected', 'No directory')
+        find_actor(mubin_directory, name)
     elif 'import mubin' in task or 'mubin(s) stats' in task:
         mubin_filetypes = [('mubin', '*.smubin'), ('all', '*.*')]
         mubin_paths = filedialog.askopenfilenames(filetypes=mubin_filetypes)
