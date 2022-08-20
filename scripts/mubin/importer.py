@@ -120,6 +120,13 @@ def set_active_collection(name):
     #           {model_name} (linked collection object)
 
 
+def set_render_mode(layer_collection_name, viewport=False):
+    if not viewport:
+        layer_collection_cache[layer_collection_name].collection.hide_viewport = True
+    else:
+        layer_collection_cache[layer_collection_name].collection.hide_render = True
+
+
 def import_all_mubins(prefix: str = ''):
     print('import_all_mubins')
     start_time = time.time()
@@ -161,10 +168,13 @@ def import_all_mubins(prefix: str = ''):
     # include_all_collections()
     # include only far lod for intially lightweight viewport, make it one-click easy to enable detailed
     for cname in layer_collection_cache.keys():
-        if 'Instances' in cname:
-            exclude_collection(cname, False)
+        exclude_collection(cname, False)
+        if 'Instances_Far' in cname:
+            set_render_mode(cname, True)
         if 'Instances' in cname and 'Instances_Far' not in cname:
-            exclude_collection(cname)
+            set_render_mode(cname, False)
+
+    bpy.data.collections.remove(layer_collection_cache['Assets'].collection)
 
     end_time = time.time()
     sec = end_time - start_time
