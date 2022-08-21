@@ -8,6 +8,10 @@ import mathutils
 # Most likely the override library part worked but the transforms didn't, it'll be at world origin
 # If anyone knows how to fix this let me know / submit a PR
 
+# select_next means the script will make the next selected object active rather than the newly-overriden one
+# helps for overriding a bunch of instances
+select_next = True
+
 obj = bpy.context.active_object
 name = obj.name[:-4]
 name_len = len(obj.name)
@@ -16,29 +20,33 @@ transforms = {
     'r': obj.rotation_euler,
     's': obj.scale
 }
+existing_armatures = [o.name for o in bpy.data.objects if o.type=='ARMATURE' and name in o.name]
+print('\n')
+print("existing_armatures")
+print(existing_armatures)
 bpy.ops.object.make_override_library()
 print(name)
 print('looping')
 
-# find the new object and add the transforms back
-for possible_object in bpy.data.objects:
-    possible_object: bpy.types.Object = possible_object
-    if len(possible_object.name) == name_len and name in possible_object.name:
-        if possible_object.type != 'ARMATURE':
-            continue
-        default_location = bool(x == 0 for x in possible_object.location)
-        x = str(round(possible_object.rotation_euler.x, 2))
-        default_rotationx = (x == '1.57')
-        default_rotationy = (possible_object.rotation_euler.y == 0)
-        default_rotationz = (possible_object.rotation_euler.z == 0)
-        default_rotation = (default_rotationx and default_rotationy and default_rotationz)
-        default_scale = bool(x == 0 for x in possible_object.scale)
-        if (default_location and default_rotation and default_scale):
-            print(possible_object.name)
-            print('setting transforms')
-            possible_object.location = transforms['l']
-            possible_object.rotation_euler.rotate(mathutils.Euler(transforms['r']))
-            possible_object.scale = transforms['s']
-            possible_object.select_set(True)
-            bpy.context.view_layer.objects.active = possible_object
-            break
+new_armatures = [o.name for o in bpy.data.objects if o.type=='ARMATURE' and name in o.name and o.name not in existing_armatures]
+print("new_armatures")
+print(new_armatures)
+
+# sometimes the override becomes the original name somehow
+if len(new_armatures) == 0:
+    new_armatures = [name]
+if len(new_armatures) == 1:
+    new_object = bpy.data.objects[new_armatures[0]]
+    print(new_object.name)
+    print('setting transforms')
+    new_object.location = transforms['l']
+    new_object.rotation_euler.rotate(mathutils.Euler(transforms['r']))
+    new_object.scale = transforms['s']
+
+    selected_objects = bpy.context.selected_objects
+    print(selected_objects)
+    if select_next and len(selected_objects) > 0:
+        bpy.context.view_layer.objects.active = selected_objects[0]
+    else:
+        new_object.select_set(True)
+        bpy.context.view_layer.objects.active = new_object
