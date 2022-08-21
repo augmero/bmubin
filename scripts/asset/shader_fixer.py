@@ -354,8 +354,8 @@ def fix_shaders(dae_name):
         print('getting base color')
         base_color = material_nodes.get('Image Texture')
 
-        if 'flag' not in o.name.lower():
-            o.active_material.use_backface_culling = True
+        # if 'flag' not in o.name.lower():
+        #     o.active_material.use_backface_culling = True
         o.active_material.blend_method = "HASHED"
 
         shader = material_nodes.get('Principled BSDF')
