@@ -59,6 +59,7 @@ def terrain_shader(object: bpy.types.Object, indices: list, soindices: list, exi
                 material1 = textureIndex
         print(f'material0: {material0}')
         print(f'material1: {material1}')
+        # custom properties
         object["scale"] = .1
         object["material0"] = material0
         if existing_image:
@@ -179,7 +180,10 @@ def terrain_and_image_shader(object: bpy.types.Object):
 
     material_nodes = object.active_material.node_tree.nodes
     material_links = object.active_material.node_tree.links
-    shader = material_nodes.get('Principled BSDF')
+    shader = None
+    for nd in material_nodes:
+        if nd.label == 'SharedBSDF':
+            shader = nd
     base_color = material_nodes.get('Image Texture')
 
     geometry_nodes_edge(object)
@@ -205,8 +209,8 @@ def terrain_and_image_shader(object: bpy.types.Object):
         normal_image_node.image = normal_image
         normal_image_node.location[0] -= 600
         normal_image_node.location[1] -= 300
-        material_links.new(actor_terrain_image_node.inputs["Normal Image"], normal_image_node.outputs["Color"])
-        material_links.new(shader.inputs["Normal"], actor_terrain_image_node.outputs["Normal"])
+        material_links.new(actor_terrain_image_node.inputs["Normal Color"], normal_image_node.outputs["Color"])
+        material_links.new(shader.inputs["Normal Color"], actor_terrain_image_node.outputs["Normal Color"])
     else:
         print('no normals found')
 
@@ -219,39 +223,49 @@ def terrain_and_image_shader(object: bpy.types.Object):
 
 
 def alpha_blend_edges(object, material_nodes, material_links, shader):
-    # if we're 'translucent' alpha blend the edges
-    if 'paint' in object.name.lower():
-        return
-    if object.active_material.blend_method == "BLEND":
-        geometry_nodes_edge(object)
-        if not solidify_modifier(object):
-            return
-        # color attribute -> invert -> bright/contrast -> clamp
-        color_attribute_node = material_nodes.new(type='ShaderNodeVertexColor')
-        color_attribute_node.layer_name = 'edge'
-        color_attribute_node.location[0] -= 1200
+    # if we're 'translucent' alpha blend the edges  
+    if object.active_material.blend_method != "BLEND":
+        return False
 
-        invert_node = material_nodes.new(type='ShaderNodeInvert')
-        invert_node.location[0] -= 900
-        material_links.new(invert_node.inputs["Color"], color_attribute_node.outputs["Color"])
+    # exclude some names this shouldn't apply to
+    name_exclude = ['paint', 'house', 'sign']
+    obj_name_lower = object.name.lower()
+    for name in name_exclude:
+        if name in obj_name_lower:
+            return False
 
-        bright_contrast_node = material_nodes.new(type='ShaderNodeBrightContrast')
-        bright_contrast_node.inputs["Bright"].default_value = -2
-        bright_contrast_node.inputs["Contrast"].default_value = 4
-        bright_contrast_node.location[0] -= 600
-        material_links.new(bright_contrast_node.inputs["Color"], invert_node.outputs["Color"])
+    geometry_nodes_edge(object)
+    if not solidify_modifier(object):
+        return False
+    # color attribute -> invert -> bright/contrast -> clamp
+    color_attribute_node = material_nodes.new(type='ShaderNodeVertexColor')
+    color_attribute_node.layer_name = 'edge'
+    color_attribute_node.location[0] -= 1200
 
-        clamp_node = material_nodes.new(type='ShaderNodeClamp')
-        clamp_node.location[0] -= 300
-        material_links.new(clamp_node.inputs["Value"], bright_contrast_node.outputs["Color"])
-        material_links.new(shader.inputs["Alpha"], clamp_node.outputs["Result"])
+    invert_node = material_nodes.new(type='ShaderNodeInvert')
+    invert_node.location[0] -= 900
+    material_links.new(invert_node.inputs["Color"], color_attribute_node.outputs["Color"])
+
+    bright_contrast_node = material_nodes.new(type='ShaderNodeBrightContrast')
+    bright_contrast_node.inputs["Bright"].default_value = -2
+    bright_contrast_node.inputs["Contrast"].default_value = 4
+    bright_contrast_node.location[0] -= 600
+    material_links.new(bright_contrast_node.inputs["Color"], invert_node.outputs["Color"])
+
+    clamp_node = material_nodes.new(type='ShaderNodeClamp')
+    clamp_node.location[0] -= 300
+    material_links.new(clamp_node.inputs["Value"], bright_contrast_node.outputs["Color"])
+    material_links.new(shader.inputs["Alpha"], clamp_node.outputs["Result"])
 
 
 def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
     print(f'terrain_shader_secondary {image_stem}')
     material_nodes = object.active_material.node_tree.nodes
     material_links = object.active_material.node_tree.links
-    shader = material_nodes.get('Principled BSDF')
+    shader = None
+    for nd in material_nodes:
+        if nd.label == 'SharedBSDF':
+            shader = nd
     if not image_stem:
         image_stem = object.name
     if 'Mt_' in image_stem:
@@ -282,12 +296,7 @@ def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
             normal_image_node.image = normal_image
             normal_image_node.location[0] -= 600
             normal_image_node.location[1] -= 200
-            bump = material_nodes.new(type='ShaderNodeBump')
-            bump.location[0] -= 200
-            bump.location[1] -= 200
-            bump.inputs["Strength"].default_value = .3
-            material_links.new(bump.inputs["Height"], normal_image_node.outputs["Color"])
-            material_links.new(shader.inputs["Normal"], bump.outputs["Normal"])
+            material_links.new(shader.inputs["Normal Color"], normal_image_node.outputs["Color"])
         else:
             print(f'image load failed for {normal_image_name}')
         alpha_blend_edges(object, material_nodes, material_links, shader)
@@ -358,14 +367,43 @@ def fix_shaders(dae_name):
         #     o.active_material.use_backface_culling = True
         o.active_material.blend_method = "HASHED"
 
-        shader = material_nodes.get('Principled BSDF')
+        # cel shading custom prop 
+        o["cel"] = 1
+
+        # use shared shader instead
+        existing_shader = material_nodes.get('Principled BSDF')
+        if existing_shader:
+            material_nodes.remove(existing_shader)
+        shader_tree = append_node_tree('SharedBSDF')
+        shader = material_nodes.new(type='ShaderNodeGroup')
+        shader.node_tree = shader_tree
+        shader.name = 'SharedBSDF'
+        shader.label = 'SharedBSDF'
+        shader.location[1] += 300
+        material_output = material_nodes.get('Material Output')
+        material_links.new(material_output.inputs["Surface"], shader.outputs["BSDF Eevee"])
+        material_output_cycles = material_nodes.new(type='ShaderNodeOutputMaterial')
+        material_output_cycles.target = 'CYCLES'
+        material_output_cycles.location[0] = material_output.location[0]
+        material_output_cycles.location[1] = material_output.location[1] - 150
+        material_links.new(material_output_cycles.inputs["Surface"], shader.outputs["BSDF Cycles"])
+
+        specular_node = None
+        for nd in material_nodes:
+            if nd.label == 'Specular':
+                specular_node = nd
+                material_links.new(shader.inputs["Specular"], specular_node.outputs["Color"])
+
+        emission_image_node = None
+        for nd in material_nodes:
+            if nd.label == 'Emission':
+                emission_image_node = nd
+                material_links.new(shader.inputs["Emission"], emission_image_node.outputs["Color"])
+
 
         if 'metal' in o.name.lower():
             shader.inputs['Metallic'].default_value = 1
 
-        # 0 specular seems a bit too flat
-        # if shader.inputs['Specular'].default_value < .1:
-        #     shader.inputs['Specular'].default_value = .2
 
         if asset_info:
             mat_info = asset_info.get(o.active_material.name)
@@ -395,6 +433,7 @@ def fix_shaders(dae_name):
                     continue
 
         if base_color:
+            material_links.new(shader.inputs["Base Color"], base_color.outputs["Color"])
             # handle ALPHA
             # first check if there's an available mask, if not just wire the base color
             image_stem = base_color.image.name[:-7]
@@ -417,36 +456,50 @@ def fix_shaders(dae_name):
                 mask_image_node.location[1] -= 300
                 material_links.new(shader.inputs["Alpha"], mask_image_node.outputs["Color"])
             else:
-                is_lamp = 'lamp' in dae_name.lower() or 'lamp' in o.name.lower()
+                possible_lamp_name_artefacts = ['lamp', 'light']
+                is_lamp = False
+                for ln in possible_lamp_name_artefacts:
+                    is_lamp = is_lamp or ln in dae_name.lower() or ln in o.name.lower()
                 if 'glass' in o.name.lower() and not is_lamp:
                     # cycles
                     glass_node_tree = append_node_tree('BotW_Cycles_Glass')
                     glass_node = material_nodes.new(type='ShaderNodeGroup')
                     glass_node.node_tree = glass_node_tree
+                    glass_node.location[0] += 300
 
                     # eevee
-                    default_alpha = .4
-                    if 'inside' in o.name.lower() or 'outside' in o.name.lower():
-                        default_alpha = .2
+                    default_alpha = .2
+                    # if 'inside' in o.name.lower() or 'outside' in o.name.lower():
+                    #     default_alpha = .25
                     shader.inputs['Alpha'].default_value = default_alpha
+                    shader.inputs['Transmission'].default_value = 1
                 else:
                     material_links.new(shader.inputs["Alpha"], base_color.outputs["Alpha"])
                 # make lamps emissive warmer, add lights
                 if 'glass' in o.name.lower() and is_lamp:
                     print('LAMP DETECTED')
                     add_normal = False
-                    emission_image_node = None
-                    for nd in material_nodes:
-                        if nd.label == 'Emission':
-                            emission_image_node = nd
                     if emission_image_node:
                         ramp_tree = append_node_tree('warm_emissive_ramp')
                         ramp = material_nodes.new(type='ShaderNodeGroup')
                         ramp.node_tree = ramp_tree
-                        emission_image_node.location[0] -= 300
-                        ramp.location[0] -= 150
+                        ramp.location[0] -= 250
+                        emission_image_node.location[0] -= 200
                         material_links.new(ramp.inputs["Fac"], emission_image_node.outputs["Color"])
                         material_links.new(shader.inputs["Emission"], ramp.outputs["Color"])
+
+                        add_emissive_tree = append_node_tree('AddEmissive')
+                        add_emissive_node = material_nodes.new(type='ShaderNodeGroup')
+                        add_emissive_node.node_tree = add_emissive_tree
+                        add_emissive_node.location[0] += 200
+                        add_emissive_node.location[1] -= 300
+                        material_output.location[0] += 150
+                        material_output_cycles.location[0] += 150
+                        material_links.new(add_emissive_node.inputs["Shader Eevee"], shader.outputs["BSDF Eevee"])
+                        material_links.new(add_emissive_node.inputs["Shader Cycles"], shader.outputs["BSDF Cycles"])
+                        material_links.new(add_emissive_node.inputs["Color"], ramp.outputs["Color"])
+                        material_links.new(material_output.inputs["Surface"], add_emissive_node.outputs["Shader Eevee"])
+                        material_links.new(material_output_cycles.inputs["Surface"], add_emissive_node.outputs["Shader Cycles"])
                     # find center location
                     # https://blender.stackexchange.com/questions/62040/get-center-of-geometry-of-an-object
                     # local_bbox_center = 0.125 * sum((Vector(b) for b in o.bound_box), Vector())
@@ -472,13 +525,8 @@ def fix_shaders(dae_name):
                 normal_image_node = material_nodes.new(type='ShaderNodeTexImage')
                 normal_image_node.image = normal_image
                 normal_image_node.location[0] -= 600
-                normal_image_node.location[1] -= 600
-                bump = material_nodes.new(type='ShaderNodeBump')
-                bump.location[0] -= 200
-                bump.location[1] -= 400
-                bump.inputs["Strength"].default_value = .3
-                material_links.new(bump.inputs["Height"], normal_image_node.outputs["Color"])
-                material_links.new(shader.inputs["Normal"], bump.outputs["Normal"])
+                normal_image_node.location[1] -= 300
+                material_links.new(shader.inputs["Normal Color"], normal_image_node.outputs["Color"])
             else:
                 print('no normals found')
 
@@ -493,10 +541,19 @@ def fix_shaders(dae_name):
                 trs_image_node.location[0] -= 600
                 # easy one is roughness
                 material_links.new(shader.inputs["Roughness"], trs_image_node.outputs["Color"])
-                material_links.new(shader.inputs["Specular"], trs_image_node.outputs["Color"])
+                if not specular_node:
+                    material_links.new(shader.inputs["Specular"], trs_image_node.outputs["Color"])
             else:
                 print('no trs found')
         else:
             print('no base color found, trying terrain shader')
             terrain_shader_secondary(o)
+
         alpha_blend_edges(o, material_nodes, material_links, shader)
+        # extra names to solidify
+        solidify_names = ['house_t']
+        obj_name_lower = o.name.lower()
+        for name in solidify_names:
+            if name in obj_name_lower:
+                solidify_modifier(o)
+
