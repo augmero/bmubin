@@ -5,6 +5,7 @@ from pathlib import Path
 
 with open("mbconfig.json", "r") as f:
     config = json.load(f)
+    f.close()
 
 textures_path = config['texturesPath']
 textures_path_abs = os.path.abspath(textures_path)
@@ -13,14 +14,22 @@ terrain_hybrid = config['terrainHybrid']
 
 with open(f"linked_resources\\json\\generated\\normals.json", "r") as f:
     normals: dict = json.load(f)
+    f.close()
 with open(f"linked_resources\\json\\generated\\masks.json", "r") as f:
     masks: dict = json.load(f)
+    f.close()
 with open(f"linked_resources\\json\\generated\\trs.json", "r") as f:
     trs: dict = json.load(f)
+    f.close()
 with open(f"linked_resources\\json\\terrainmat_names.json", "r") as f:
     terrainmat_names: dict = json.load(f)
+    f.close()
 with open(f"linked_resources\\json\\assets_info.json", "r") as f:
     assets_info: dict = json.load(f)
+    f.close()
+with open(f"linked_resources\\json\\sensible_defaults.json", "r") as f:
+    sensible_defaults: dict = json.load(f)
+    f.close()
 
 
 # common patterns for shaderOptionsIndexArray (made from uking_texture_array_texture)
@@ -117,6 +126,8 @@ def append_node_tree(node_group_name):
         files = [{'name': node_group_name}]
         bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
     node_tree = bpy.data.node_groups.get(node_group_name)
+    if not node_tree:
+        print(f'Warning - node tree {node_group_name} append failed')
     return node_tree
 
 
@@ -155,7 +166,7 @@ def solidify_modifier(object):
 
 def geometry_nodes_edge(object):
     object: bpy.types.Object = object
-    if not object.modifiers.get('GN - Edge'):
+    if not object.modifiers.get('GN Edge'):
         # geometry nodes
         object.data.color_attributes.new('edge', 'FLOAT_COLOR', 'CORNER')
         gn_edge = append_node_tree('GN - Edge')
@@ -180,11 +191,8 @@ def terrain_and_image_shader(object: bpy.types.Object):
 
     material_nodes = object.active_material.node_tree.nodes
     material_links = object.active_material.node_tree.links
-    shader = None
-    for nd in material_nodes:
-        if nd.label == 'SharedBSDF':
-            shader = nd
-    base_color = material_nodes.get('Image Texture')
+    shader = get_node_by_label('SharedBSDF', material_nodes)
+    base_color = get_node_by_label('Base Color', material_nodes)
 
     geometry_nodes_edge(object)
 
@@ -223,7 +231,7 @@ def terrain_and_image_shader(object: bpy.types.Object):
 
 
 def alpha_blend_edges(object, material_nodes, material_links, shader):
-    # if we're 'translucent' alpha blend the edges  
+    # if we're 'translucent' alpha blend the edges
     if object.active_material.blend_method != "BLEND":
         return False
 
@@ -262,10 +270,7 @@ def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
     print(f'terrain_shader_secondary {image_stem}')
     material_nodes = object.active_material.node_tree.nodes
     material_links = object.active_material.node_tree.links
-    shader = None
-    for nd in material_nodes:
-        if nd.label == 'SharedBSDF':
-            shader = nd
+    shader = get_node_by_label('SharedBSDF', material_nodes)
     if not image_stem:
         image_stem = object.name
     if 'Mt_' in image_stem:
@@ -302,9 +307,17 @@ def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
         alpha_blend_edges(object, material_nodes, material_links, shader)
 
     else:
+        # try sensible default 
+        sensible_default = sensible_defaults.get(object.active_material.name.lower())
+        if sensible_default:
+            print('Attempting to use sensible default')
+            if apply_mat_info(object, sensible_default):
+                return
+
         # approximate the closest possible terrain texture, for instance some of the objects have similar names or are misspelled
         import difflib
         image_stem = str(image_stem).replace("Criff", "Cliff")
+        image_stem = str(image_stem).replace("GrassGreen", "GreenGrass")
         terrain_keys = terrainmat_names.keys()
         print(image_stem)
         closest_match = difflib.get_close_matches(image_stem, terrain_keys, 1, .5)
@@ -335,6 +348,47 @@ def make_light(name: str, power, size, color):
     return light_object
 
 
+def apply_mat_info(object, mat_info):
+    print(mat_info)
+    o = object
+    material_nodes = o.active_material.node_tree.nodes
+    material_links = o.active_material.node_tree.links
+    shader = get_node_by_label('SharedBSDF', material_nodes)
+    base_color = get_node_by_label('Base Color', material_nodes)
+
+    render_state = mat_info.get("renderState")
+    if render_state:
+        if mat_info.get("renderState") == "Opaque":
+            o.active_material.blend_method = "OPAQUE"
+        elif mat_info.get("renderState") == "AlphaMask":
+            o.active_material.blend_method = "HASHED"
+        elif mat_info.get("renderState") == "Custom":
+            o.active_material.blend_method = "HASHED"
+        elif mat_info.get("renderState") == "Translucent":
+            o.active_material.blend_method = "BLEND"
+    else:
+        o.active_material.blend_method = "HASHED"
+    indices: list = mat_info.get('indexArray')
+    soindices: list = mat_info.get('shaderOptionsIndexArray')
+    existing_image = False
+    if base_color:
+        existing_image = True
+    if indices and soindices and terrain_hybrid:
+        terrain_shader(o, indices, soindices, existing_image)
+        alpha_blend_edges(o, material_nodes, material_links, shader)
+        return True
+    return False
+
+
+def get_node_by_label(label, material_nodes):
+    for nd in material_nodes:
+        print(nd.label)
+        if nd.label == label:
+            return nd
+    print(f'node {label} not found')
+    return None
+
+
 def fix_shaders(dae_name):
     # This function does its best to fix all the stuff that the collada import missed
 
@@ -343,7 +397,10 @@ def fix_shaders(dae_name):
     #   AlphaMask = Alpha Blend??
     print('\n\n\n')
     print('fixing shaders...')
-    batch_collection = bpy.data.collections['Collection']
+    batch_collection = bpy.data.collections.get('Collection')
+    if not batch_collection:
+        print('Default collection not found, shaders cannot be fixed')
+        return
     asset_info = assets_info.get(dae_name)
     for o in batch_collection.objects:
         if o.type != 'MESH':
@@ -360,14 +417,16 @@ def fix_shaders(dae_name):
 
         material_nodes = o.active_material.node_tree.nodes
         material_links = o.active_material.node_tree.links
-        print('getting base color')
-        base_color = material_nodes.get('Image Texture')
+
+        base_color = get_node_by_label('Base Color', material_nodes)
+        if not base_color:
+            print('base color not found')
 
         # if 'flag' not in o.name.lower():
         #     o.active_material.use_backface_culling = True
         o.active_material.blend_method = "HASHED"
 
-        # cel shading custom prop 
+        # cel shading custom prop
         o["cel"] = 1
 
         # use shared shader instead
@@ -388,49 +447,24 @@ def fix_shaders(dae_name):
         material_output_cycles.location[1] = material_output.location[1] - 150
         material_links.new(material_output_cycles.inputs["Surface"], shader.outputs["BSDF Cycles"])
 
-        specular_node = None
-        for nd in material_nodes:
-            if nd.label == 'Specular':
-                specular_node = nd
-                material_links.new(shader.inputs["Specular"], specular_node.outputs["Color"])
+        specular_node = get_node_by_label('Specular', material_nodes)
+        if specular_node:
+            material_links.new(shader.inputs["Specular"], specular_node.outputs["Color"])
 
-        emission_image_node = None
-        for nd in material_nodes:
-            if nd.label == 'Emission':
-                emission_image_node = nd
-                material_links.new(shader.inputs["Emission"], emission_image_node.outputs["Color"])
-
+        emission_image_node = get_node_by_label('Emission', material_nodes)
+        if emission_image_node:
+            material_links.new(shader.inputs["Emission"], emission_image_node.outputs["Color"])
 
         if 'metal' in o.name.lower():
             shader.inputs['Metallic'].default_value = 1
 
-
+        mat_info = None
         if asset_info:
             mat_info = asset_info.get(o.active_material.name)
 
-            if mat_info:
-                print(mat_info)
-                render_state = mat_info.get("renderState")
-                if render_state:
-                    if mat_info.get("renderState") == "Opaque":
-                        o.active_material.blend_method = "OPAQUE"
-                    elif mat_info.get("renderState") == "AlphaMask":
-                        o.active_material.blend_method = "HASHED"
-                    elif mat_info.get("renderState") == "Custom":
-                        o.active_material.blend_method = "HASHED"
-                    elif mat_info.get("renderState") == "Translucent":
-                        o.active_material.blend_method = "BLEND"
-                else:
-                    o.active_material.blend_method = "HASHED"
-                indices: list = mat_info.get('indexArray')
-                soindices: list = mat_info.get('shaderOptionsIndexArray')
-                existing_image = False
-                if base_color:
-                    existing_image = True
-                if indices and soindices and terrain_hybrid:
-                    terrain_shader(o, indices, soindices, existing_image)
-                    alpha_blend_edges(o, material_nodes, material_links, shader)
-                    continue
+        if mat_info:
+            if apply_mat_info(o, mat_info):
+                continue
 
         if base_color:
             material_links.new(shader.inputs["Base Color"], base_color.outputs["Color"])
@@ -499,7 +533,9 @@ def fix_shaders(dae_name):
                         material_links.new(add_emissive_node.inputs["Shader Cycles"], shader.outputs["BSDF Cycles"])
                         material_links.new(add_emissive_node.inputs["Color"], ramp.outputs["Color"])
                         material_links.new(material_output.inputs["Surface"], add_emissive_node.outputs["Shader Eevee"])
-                        material_links.new(material_output_cycles.inputs["Surface"], add_emissive_node.outputs["Shader Cycles"])
+                        material_links.new(
+                            material_output_cycles.inputs["Surface"],
+                            add_emissive_node.outputs["Shader Cycles"])
                     # find center location
                     # https://blender.stackexchange.com/questions/62040/get-center-of-geometry-of-an-object
                     # local_bbox_center = 0.125 * sum((Vector(b) for b in o.bound_box), Vector())
@@ -556,4 +592,3 @@ def fix_shaders(dae_name):
         for name in solidify_names:
             if name in obj_name_lower:
                 solidify_modifier(o)
-
