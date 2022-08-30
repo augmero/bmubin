@@ -46,7 +46,11 @@ def clean_file():
 # this makes the layout viewport show the image textures
 def set_shading_type():
     print('set shading type')
-    for area in bpy.data.screens["Layout"].areas:
+    layout = bpy.data.screens.get('Layout')
+    if not layout:
+        print('Default layout window not found, cannot set shading type')
+        return
+    for area in layout.areas:
         if area.type == 'VIEW_3D':
             for space in area.spaces:
                 if space.type == 'VIEW_3D':
@@ -114,6 +118,13 @@ def main():
         if not new_dae_file_path.is_file():
             new_dae_file_path = dae_fixer.fix_dae(asset_path)
         # new_dae_file_path = dae_fixer.fix_dae(asset_path)
+        default_collection = bpy.data.collections.get('Collection')
+        if not default_collection:
+            default_collection = bpy.data.collections.new('Collection')
+            bpy.context.scene.collection.children.link(default_collection)
+            vl_collections = bpy.context.scene.view_layers["ViewLayer"].layer_collection
+            default_layer_collection = vl_collections.children.get('Collection')
+            bpy.context.view_layer.active_layer_collection = default_layer_collection
 
         import_dae(str(new_dae_file_path))
         shader_fixer.fix_shaders(dae_name)
@@ -124,7 +135,10 @@ def main():
         root_bone = armature.pose.bones.get("Root")
         if root_bone:
             root_bone.rotation_mode = 'XYZ'
-        bpy.data.collections['Collection'].name = dae_name
+        if default_collection:
+            default_collection.name = dae_name
+        else:
+            print('Default collection not found, cannot rename')
         print(dae_name)
         save(save_path)
     else:
