@@ -7,6 +7,12 @@ textures/
 starting_scene/
 data_dir/
 error.txt
+generated/
+map_data/
+linked_resources/*
+!linked.blend
+!json/
+*.lnk
 
 
 # https://github.com/github/gitignore PYTHON TEMPLATE BELOW

@@ -1,4 +1,3 @@
-from random import randint
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 import time
@@ -124,6 +123,16 @@ def build_asset_library(quiet=True, timeout=60):
     print("Building asset library")
     cache_textures()
     assets_to_build = assets_to_build_flawed()
+    # quiet = False
+    # assets_to_build = assets_to_build[:1]
+
+    with open("missing_shaders.txt", "w") as f:
+        missing_shaders = {
+            "fileInfo": "This file was auto generated, below is a list of assets and materials that are broken"
+        }
+        json.dump(missing_shaders, f, indent=4)
+        f.close()
+
     futures = [executor.submit(build_asset, x, quiet, True, timeout) for x in assets_to_build]
     num_completed = 0
     num_timeout = 0

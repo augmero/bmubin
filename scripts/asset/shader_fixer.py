@@ -1,4 +1,7 @@
+from genericpath import isfile
 import bpy
+import bmesh
+from mathutils import Vector
 import os
 import json
 from pathlib import Path
@@ -9,7 +12,7 @@ with open("mbconfig.json", "r") as f:
 
 textures_path = config['texturesPath']
 textures_path_abs = os.path.abspath(textures_path)
-terrain_hybrid = config['terrainHybrid']
+asset_name = "test"
 
 
 with open(f"linked_resources\\json\\generated\\normals.json", "r") as f:
@@ -100,17 +103,8 @@ def terrain_shader_apply(object: bpy.types.Object, dual: bool = True):
     # rename the uv maps for the shader
     for index, uvmap in enumerate(object.data.uv_layers):
         uvmap.name = f'UVMap{index}'
-    # actor terrain material maybe already imported
-    actor_terrain_material = bpy.data.materials.get(terrain_material_name)
 
-    if not actor_terrain_material:
-        # import the actor terrain material from actor_terrain_material.blend
-        append_directory = Path(f"linked_resources\\linked.blend").absolute()
-        append_directory = f'{str(append_directory)}\\Material\\'
-        files = [{'name': terrain_material_name}]
-        bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
-    actor_terrain_material = bpy.data.materials.get(terrain_material_name)
-
+    actor_terrain_material = append_material(terrain_material_name)
     # replace the material with the actor terrain one
     object.active_material = actor_terrain_material
 
@@ -129,6 +123,18 @@ def append_node_tree(node_group_name):
     if not node_tree:
         print(f'Warning - node tree {node_group_name} append failed')
     return node_tree
+
+
+def append_material(mat_name):
+    mat = bpy.data.materials.get(mat_name)
+    if not mat:
+        # import the actor terrain material from mat.blend
+        append_directory = Path(f"linked_resources\\linked.blend").absolute()
+        append_directory = f'{str(append_directory)}\\Material\\'
+        files = [{'name': mat_name}]
+        bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
+    mat = bpy.data.materials.get(mat_name)
+    return mat
 
 
 def link_lamp(lamp_name, location=None):
@@ -307,7 +313,7 @@ def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
         alpha_blend_edges(object, material_nodes, material_links, shader)
 
     else:
-        # try sensible default 
+        # try sensible default
         sensible_default = sensible_defaults.get(object.active_material.name.lower())
         if sensible_default:
             print('Attempting to use sensible default')
@@ -331,6 +337,11 @@ def terrain_shader_secondary(object: bpy.types.Object, image_stem=None):
             missing.node_tree = missing_tree
             missing.location[0] -= 250
             material_links.new(shader.inputs["Base Color"], missing.outputs["Color"])
+
+            with open("missing_shaders.txt", "a") as f:
+                lines = [f'{asset_name}\n', f'\t{object.active_material.name}\n']
+                f.writelines(lines)
+                f.close()
 
             print('no terrain mats found')
 
@@ -373,7 +384,7 @@ def apply_mat_info(object, mat_info):
     existing_image = False
     if base_color:
         existing_image = True
-    if indices and soindices and terrain_hybrid:
+    if indices and soindices:
         terrain_shader(o, indices, soindices, existing_image)
         alpha_blend_edges(o, material_nodes, material_links, shader)
         return True
@@ -389,7 +400,49 @@ def get_node_by_label(label, material_nodes):
     return None
 
 
+def flip_negative_x_uv(object):
+    # https://blender.stackexchange.com/questions/144589/how-to-make-object-translations-in-the-uv-editor-scripting-blender-python-api
+    object: bpy.types.Object = object
+    # me = bpy.context.edit_object.data
+    # bm = bmesh.from_edit_mesh(me)
+    bm = bmesh.new()
+    bm.from_mesh(object.data)
+
+    uv_layer = bm.loops.layers.uv.verify()
+
+    # it's useful to organize your UVs into a dictionary if you're manipulating a lot of stuff all at once,
+    # otherwise you're going to be looping through bmface.loops a LOT.
+    uv_verts = {}
+
+    for face in bm.faces:
+        # print(f"Face #{face.index}")
+        for loop in face.loops:
+            # print(f"\tv{loop.vert.index}: {loop[uv_layer].uv}")
+            if loop.vert not in uv_verts:
+                uv_verts[loop.vert] = [loop[uv_layer]]
+            else:
+                uv_verts[loop.vert].append(loop[uv_layer])
+
+    # now that we have a dictionary of UV verts, it's fairly simple to do transformations on the UVs on a per vertex basis
+    # here we take all of the selected UV verts and move them up and to the right by .1
+    for vert in uv_verts:
+        for uv_loop in uv_verts[vert]:
+            uv_loop: bmesh.types.BMLoopUV = uv_loop
+            # try to flip these?
+            if uv_loop.uv.x < 0:
+                uv_loop.uv *= Vector((-1, 1))
+                # uv_loop.uv += Vector((10.0, 10.0))
+            # if uv_loop.select:
+                # uv_loop.uv += Vector((10.0, 10.0))
+
+    # bmesh.update_edit_mesh(me, False, False)
+    bm.to_mesh(object.data)
+    bm.free()
+
+
 def fix_shaders(dae_name):
+    global asset_name
+    asset_name = dae_name
     # This function does its best to fix all the stuff that the collada import missed
 
     # Vertex color is used as an attribute to mix in a secondary texture
@@ -465,6 +518,24 @@ def fix_shaders(dae_name):
         if mat_info:
             if apply_mat_info(o, mat_info):
                 continue
+
+        # handle water
+        if ('water' in o.active_material.name.lower() or 'water' in o.name.lower()) and 'fall' not in o.name.lower():
+            water_mat_name = 'BotW_DungeonWater'
+            o.active_material = append_material(water_mat_name)
+            continue
+
+        # handle lava
+        if ('lava' in o.active_material.name.lower() or 'lava' in o.name.lower()) and 'fall' not in o.name.lower():
+            lava_mat_name = 'BotW_Lava'
+            o.active_material = append_material(lava_mat_name)
+            continue
+
+        # handle grudge
+        if ('grudge' in o.active_material.name.lower() or 'grudge' in o.name.lower()):
+            grudge_mat_name = 'BotW_Grudge'
+            o.active_material = append_material(grudge_mat_name)
+            continue
 
         if base_color:
             material_links.new(shader.inputs["Base Color"], base_color.outputs["Color"])
@@ -548,11 +619,29 @@ def fix_shaders(dae_name):
                     # light_global = make_light('light_global', 40, .5, warm_light_color)
                     # light_global.visible_diffuse = False
                     # light_global.location = global_bbox_center
-                    link_lamp('lamp_light')
+                    lamp_obj = link_lamp('lamp_light')
+                elif is_lamp:
+                    wide2_lamp_names = [
+                        'gerudo_light_a_01',
+                        'gerudo_light_a_02',
+                        'gerudo_light_a_03',
+                    ]
+
+                    wide2 = False
+                    for ln in wide2_lamp_names:
+                        wide2 = wide2 or ln in o.name.lower() or ln in dae_name.lower()
+
+                    # lamp wide 2
+                    if wide2:
+                        lamp_obj = link_lamp('lamp_light_wide2')
+                    # default
+                    else:
+                        lamp_obj = link_lamp('lamp_light_wide1')
 
             # handle NORMAL, might already be imported
             normal_image_name = image_stem+"Nrm.png"
             normal_image = None
+            normal_image_node = None
             if add_normal:
                 normal_image = bpy.data.images.get(normal_image_name)
             if add_normal and not normal_image and normals.get(image_stem):
@@ -581,6 +670,28 @@ def fix_shaders(dae_name):
                     material_links.new(shader.inputs["Specular"], trs_image_node.outputs["Color"])
             else:
                 print('no trs found')
+
+            if 'waterfall' in o.name.lower() or 'lavafall' in o.name.lower():
+                # connect a time node to make the uv move
+                botw_time_tree = append_node_tree('BotW_time')
+                botw_time = material_nodes.new(type='ShaderNodeGroup')
+                botw_time.node_tree = botw_time_tree
+                botw_time.location[0] -= 1050
+                texcoord_node = material_nodes.new(type='ShaderNodeTexCoord')
+                texcoord_node.location[0] -= 850
+                texcoord_node.location[1] += 200
+                combine_node = material_nodes.new(type='ShaderNodeCombineXYZ')
+                combine_node.location[0] -= 850
+                combine_node.location[1] -= 200
+                mapping_node = material_nodes.new(type='ShaderNodeMapping')
+                mapping_node.location[0] -= 650
+                material_links.new(combine_node.inputs["Y"], botw_time.outputs["Value"])
+                material_links.new(mapping_node.inputs["Vector"], texcoord_node.outputs["UV"])
+                material_links.new(mapping_node.inputs["Location"], combine_node.outputs["Vector"])
+                material_links.new(base_color.inputs["Vector"], mapping_node.outputs["Vector"])
+                if normal_image_node:
+                    material_links.new(normal_image_node.inputs["Vector"], mapping_node.outputs["Vector"])
+
         else:
             print('no base color found, trying terrain shader')
             terrain_shader_secondary(o)
@@ -592,3 +703,6 @@ def fix_shaders(dae_name):
         for name in solidify_names:
             if name in obj_name_lower:
                 solidify_modifier(o)
+
+        if 'cloth' in o.name.lower() or 'cloth' in o.active_material.name.lower():
+            flip_negative_x_uv(o)
