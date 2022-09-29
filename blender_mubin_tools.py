@@ -178,15 +178,22 @@ def get_stats(mubin_paths):
     print('\n')
 
 
-def open_helper(func_to_run: str, arg_list: list = [], timeout_s=60, background=True, quiet=True):
+def open_helper(
+        func_to_run: str, arg_list: list = [],
+        timeout_s=60, background=True, quiet=True, launch_file: str = None):
+    print('open helper')
+    print(launch_file)
     if not func_to_run:
         return 'func_to_run param missing'
     bg = None
     if background:
         bg = '--background'
-    launch_file = os.path.abspath('starting_scene\\starting_scene.blend')
-    if not os.path.isfile(launch_file):
+    if launch_file == 'no_launch_file':
         launch_file = None
+    elif not launch_file:
+        launch_file = os.path.abspath('starting_scene\\starting_scene.blend')
+        if not os.path.isfile(launch_file):
+            launch_file = None
     args = (
         config["blenderPath"],
         launch_file,
@@ -316,10 +323,57 @@ def cache_mubins(mubin_paths: list, by_prefix=True):
             write_instance_cache.close()
 
 
+def build_terrain_map():
+    number_of_map_data_files = sum([len(files) for _, _, files in os.walk('map_data')])
+    # 0 if directory not made
+    # 5 if all directories made but no files extracted
+    if number_of_map_data_files < 6:
+        print('Extracted terrain data not found, please open Terrain\\A\\Mainfield directory')
+        from scripts.map.map_unpack import unpack_path
+
+        terrain_directory = filedialog.askdirectory()
+        if not terrain_directory:
+            print('Directory not found, exiting')
+            return ('not selected', 'No directory')
+        unpack_path(str(terrain_directory))
+        return
+
+    func_to_run = 'terrain'
+    # func_to_run = 'water'
+
+    args = (
+        config["blenderPath"],
+        '--background',
+        "--python",
+        "scripts\\map\\map_generator.py",
+        "--factory-startup",
+        "--",
+        func_to_run
+    )
+    popen_args = {
+        'stdout': subprocess.PIPE,
+        'universal_newlines': True
+    }
+
+    # popen_args['stdout'] = subprocess.DEVNULL
+    # popen_args['stderr'] = subprocess.DEVNULL
+    timeout_s = 10
+    try:
+        sprocess = subprocess.Popen(args, **popen_args)
+        for line in sprocess.stdout:
+            line = line.strip()
+            if len(line) > 0:
+                print(line)
+        # sprocess.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        print(f'Timeout for {args} ({timeout_s}s) expired', file=sys.stderr)
+        sprocess.terminate()
+        return 'timeout'
+    return 'complete'
+
+
 task_list = [
     {'task': 'extra info about these scripts', 'desc': 'Just prints some extra info'},
-    {'task': 'toggle terrain hybrid',
-     'desc': 'Toggles hybrid terrain shader for built assets, looks good for some but is broken in many others'},
     {'task': 'build asset library',
      'desc': 'Builds asset blend files for each dae file present in .collada\\ \n(multithreaded)'},
     {'task': 'build single asset', 'desc': 'Builds an asset blend file in .asset_library\\ for a selected dae file'},
@@ -333,7 +387,8 @@ task_list = [
      'desc':
      'Creates .asset_library\\combined_blends.blend by including instances of the selected blend files by prefix (ex I-7) \
      \nMap: https://objmap.zeldamods.org Enable "show map unit grid" under filter on this site to see the meaning of these prefixes \
-     \nWarning, many of these in one file will have worse performance and higher ram usage'}]
+     \nWarning, many of these in one file will have worse performance and higher ram usage'},
+    {'task': 'build terrain map', 'desc': 'parses MATE and HGHT data for use in blender'}, ]
 
 
 def print_task_list_info():
@@ -354,20 +409,6 @@ def get_task_list():
         with open("mbconfig.json", "w") as config_write:
             json.dump(config, config_write, indent=4)
             config_write.close()
-    terrain_hybrid = config['terrainHybrid']
-    for task in task_list:
-        if 'terrain hybrid' in task.get('task'):
-            if terrain_hybrid:
-                task['task'] = 'disable terrain hybrid'
-            else:
-                task['task'] = 'enable terrain hybrid'
-
-
-def toggle_terrain_hybrid():
-    config['terrainHybrid'] = not config['terrainHybrid']
-    with open("mbconfig.json", "w") as config_write:
-        json.dump(config, config_write, indent=4)
-        config_write.close()
 
 
 def run_task(task_input):
@@ -383,9 +424,6 @@ def run_task(task_input):
 
     if 'extra info about' in task:
         print_task_list_info()
-        select_task()
-    elif 'terrain hybrid' in task:
-        toggle_terrain_hybrid()
         select_task()
     elif 'build asset library' in task:
         # If lots of threads are timing out try raising this timeout value it's in seconds
@@ -423,7 +461,9 @@ def run_task(task_input):
         print(mubin_paths)
         if 'import mubin' in task:
             cache_mubins(mubin_paths, by_prefix=False)
-            open_helper('import_mubin', timeout_s=60, background=True, quiet=False)
+            # launch = 'no_launch_file'
+            launch = None
+            open_helper('import_mubin', timeout_s=60, background=True, quiet=False, launch_file=launch)
         elif 'mubin(s) stats' in task:
             get_stats(mubin_paths)
     elif 'combine mubin blend libraries' in task:
@@ -435,6 +475,8 @@ def run_task(task_input):
         if not isinstance(blend_paths, list):
             blend_paths = list(blend_paths)
         open_helper('combine_blends', arg_list=blend_paths, timeout_s=500, background=True, quiet=False)
+    elif 'build terrain' in task:
+        build_terrain_map()
     else:
         print('Command not recognized, back to main menu')
         select_task()
@@ -471,6 +513,7 @@ def main():
             print('Dependencies not installed, please try again')
             return
     if not check_texture_atlas():
+        print('Texture atlas false, exiting')
         return
 
     select_task()
@@ -481,4 +524,3 @@ if __name__ == "__main__":
     main()
 else:
     print(f"{__file__} is being imported")
-    main()
