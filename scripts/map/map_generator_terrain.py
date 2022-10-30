@@ -455,11 +455,11 @@ def build_map():
 
 
 def apply_terrain_mat(object: bpy.types.Object):
-    terrain_mat_name = 'BotW_Terrain_Map2'
+    terrain_mat_name = 'BotW_Terrain_Map'
     terrain_mat = bpy.data.materials.get(terrain_mat_name)
     if not terrain_mat:
-        # import the actor terrain material from linked_map.blend
-        append_directory = Path(f"linked_resources\\linked_map.blend").absolute()
+        # import the terrain map material from linked.blend
+        append_directory = Path(f"linked_resources\\linked.blend").absolute()
         append_directory = f'{str(append_directory)}\\Material\\'
         files = [{'name': terrain_mat_name}]
         bpy.ops.wm.append(directory=append_directory, files=files, link=True, instance_collections=True)
